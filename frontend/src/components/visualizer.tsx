@@ -26,6 +26,14 @@ const FALLBACK_LABELS: Record<FallbackMode, string> = {
 };
 
 // ──────────────────────────────────────────────────────────
+// "Forest Fire" — WMP "Bars and Waves" style: a fire-gradient
+// frequency spectrum driven by a real FFT (AnalyserNode tap on
+// the playing track), with falling peak caps + a reflection.
+// (Butterchurn can't do this; it's a dedicated Canvas2D effect.)
+// ──────────────────────────────────────────────────────────
+const FIRE_KEY = "⭐ Forest Fire";
+
+// ──────────────────────────────────────────────────────────
 // Main component
 // ──────────────────────────────────────────────────────────
 export function Visualizer({ now }: { now: NowPlaying | null }) {
@@ -34,6 +42,7 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
     const audioCtxRef = useRef<AudioContext | null>(null);
     const sourceRef = useRef<AudioBufferSourceNode | null>(null);
     const gainRef = useRef<GainNode | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
     const rafRef = useRef(0);
     const presetIdxRef = useRef(0);
     const presetMapRef = useRef<Record<string, object> | null>(null);
@@ -44,6 +53,8 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
     const flashRef = useRef({ text: "", until: 0 });
     const overlayRef = useRef<HTMLDivElement>(null);
     const [useBc, setUseBc] = useState<boolean | null>(null);
+    const [fireMode, setFireMode] = useState(true); // start on our Forest Fire
+    const fireModeRef = useRef(true);
     const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
     const [search, setSearch] = useState("");
     const [favs, setFavs] = useState<Set<string>>(() => loadSet("djset-viz-favs"));
@@ -91,7 +102,9 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                     }
                 }
                 presetMapRef.current = presets;
-                presetKeysRef.current = Object.keys(presets);
+                // FIRE_KEY is a virtual entry (our Canvas2D fire, not a Butterchurn
+                // preset) pinned first; then the Butterchurn presets alphabetically.
+                presetKeysRef.current = [FIRE_KEY, ...Object.keys(presets).sort((a, b) => a.localeCompare(b))];
 
                 const canvas = canvasRef.current;
                 if (!canvas) return;
@@ -114,6 +127,12 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 gain.connect(audioCtx.destination);
                 gainRef.current = gain;
 
+                // Analyser tap for the Fire Bars spectrum (real FFT of the track).
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.82;
+                analyserRef.current = analyser;
+
                 const viz = ButterchurnClass.createVisualizer(audioCtx, canvas, {
                     width: pw,
                     height: ph,
@@ -122,14 +141,13 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 });
                 bcRef.current = viz;
 
-                // Load first preset immediately
+                // Default to Forest Fire (FIRE_KEY) — don't load it into BC.
+                // Preload a real BC preset behind it so switching is instant.
                 const keys = presetKeysRef.current;
-                if (keys.length) {
-                    presetIdxRef.current = 1;
-                    activeKeyRef.current = keys[0];
-                    viz.loadPreset(presets[keys[0]], 0);
-                    showFlash("▶ " + keys[0].substring(0, 45));
-                }
+                presetIdxRef.current = 1; // next cycle → first real BC preset
+                activeKeyRef.current = FIRE_KEY;
+                if (keys[1] && presets[keys[1]]) viz.loadPreset(presets[keys[1]], 0);
+                showFlash("▶ Forest Fire");
 
                 setUseBc(true);
             } catch (err) {
@@ -200,6 +218,7 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 source.connect(churn);
                 churn.connect(gain!);         // muted→speakers (we hear Spotify)
                 viz!.connectAudio(churn);     // BC reads FFT from churn at full gain
+                if (analyserRef.current) churn.connect(analyserRef.current); // Fire Bars FFT tap
 
                 // Seek to Spotify's current position (interpolated locally).
                 // Even with a 1-2s drift from different audio masters, this
@@ -212,15 +231,19 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 source.start(0, seek);
                 sourceRef.current = source;
 
-                // Only auto-cycle if user hasn't manually picked a preset
-                if (!manualRef.current) {
+                // Auto-cycle Butterchurn presets on track change — but not when
+                // in Forest Fire mode (stay on fire) or right after a manual pick.
+                if (!manualRef.current && !fireModeRef.current) {
                     const presets = presetMapRef.current;
                     const keys = presetKeysRef.current;
                     if (presets && keys.length) {
-                        const idx = presetIdxRef.current % keys.length;
+                        let idx = presetIdxRef.current % keys.length;
+                        if (keys[idx] === FIRE_KEY) idx = (idx + 1) % keys.length;
                         presetIdxRef.current = idx + 1;
-                        activeKeyRef.current = keys[idx];
-                        viz!.loadPreset(presets[keys[idx]], 0.15);
+                        if (presets[keys[idx]]) {
+                            activeKeyRef.current = keys[idx];
+                            viz!.loadPreset(presets[keys[idx]], 0.15);
+                        }
                     }
                 }
                 // Reset manual flag for next track: user can re-lock by clicking again
@@ -242,10 +265,13 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
         let running = true;
         const draw = () => {
             if (!running) return;
-            try {
-                bcRef.current?.render();
-            } catch (e) {
-                console.warn("Butterchurn render error:", e);
+            // In Forest Fire mode the ForestFire canvas renders on top; skip BC.
+            if (!fireModeRef.current) {
+                try {
+                    bcRef.current?.render();
+                } catch (e) {
+                    console.warn("Butterchurn render error:", e);
+                }
             }
 
             // Overlay via DOM (never touches canvas 2D context)
@@ -296,30 +322,38 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
         return () => ro.disconnect();
     }, [useBc]);
 
-    // ── Click: cycle to next preset ───────────────────────
-    const cyclePreset = useCallback(() => {
-        const presets = presetMapRef.current;
-        const keys = presetKeysRef.current;
-        if (!presets || !keys.length) return;
-        const idx = presetIdxRef.current % keys.length;
-        const key = keys[idx];
-        presetIdxRef.current = idx + 1;
+    // ── Apply a preset key (FIRE_KEY = our canvas fire, else Butterchurn) ──
+    const applyPreset = useCallback((key: string) => {
         activeKeyRef.current = key;
         manualRef.current = true;
+        if (key === FIRE_KEY) {
+            fireModeRef.current = true;
+            setFireMode(true);
+            showFlash("▶ Forest Fire");
+            return;
+        }
+        const presets = presetMapRef.current;
+        if (!presets || !presets[key]) return;
+        fireModeRef.current = false;
+        setFireMode(false);
         bcRef.current?.loadPreset(presets[key], 0.15);
         showFlash(key.substring(0, 50));
     }, []);
 
+    // ── Click: cycle to next preset ───────────────────────
+    const cyclePreset = useCallback(() => {
+        const keys = presetKeysRef.current;
+        if (!keys.length) return;
+        const idx = presetIdxRef.current % keys.length;
+        presetIdxRef.current = idx + 1;
+        applyPreset(keys[idx]);
+    }, [applyPreset]);
+
     // ── Select specific preset (context menu) ─────────────
     const selectPreset = useCallback((key: string) => {
-        const presets = presetMapRef.current;
-        if (!presets || !presets[key]) return;
-        activeKeyRef.current = key;
-        manualRef.current = true;
-        bcRef.current?.loadPreset(presets[key], 0.15);
-        showFlash(key.substring(0, 50));
+        applyPreset(key);
         setCtxMenu(null);
-    }, []);
+    }, [applyPreset]);
 
     // ── Right-click: open context menu ────────────────────
     const onContextMenu = useCallback((e: React.MouseEvent) => {
@@ -380,6 +414,10 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                     onContextMenu={onContextMenu}
                     className="absolute inset-0 size-full cursor-pointer"
                 />
+                {/* Fire Bars spectrum (Canvas2D) — drawn on top of the BC canvas */}
+                {fireMode && (
+                    <FireBars analyser={analyserRef} onClick={cyclePreset} onContextMenu={onContextMenu} />
+                )}
                 {/* Block current preset — bottom-left float */}
                 <button
                     onClick={() => { const k = activeKeyRef.current; if (k) toggleBlocked(k); }}
@@ -642,4 +680,118 @@ function FallbackViz({
     }, [drawFire, drawBars, drawWave, spawnFire, smoothAmp, extRef]);
 
     return <canvas ref={extRef} onClick={cycleMode} className="absolute inset-0 size-full cursor-pointer" />;
+}
+
+// ──────────────────────────────────────────────────────────
+// Fire Bars — WMP "Bars and Waves" style: a fire-gradient
+// frequency spectrum (real FFT via an AnalyserNode tap) with
+// falling peak caps and a faded reflection below the baseline.
+// ──────────────────────────────────────────────────────────
+function FireBars({
+    analyser,
+    onClick,
+    onContextMenu,
+}: {
+    analyser: React.RefObject<AnalyserNode | null>;
+    onClick?: () => void;
+    onContextMenu?: (e: React.MouseEvent) => void;
+}) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const rafRef = useRef(0);
+    const N = 64; // number of bars
+    const state = useRef({ vals: new Float32Array(N), peaks: new Float32Array(N) });
+
+    useEffect(() => {
+        let running = true;
+        const freq = new Uint8Array(2048 / 2);
+
+        const draw = () => {
+            if (!running) return;
+            const canvas = canvasRef.current;
+            if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
+            const cw = Math.max(1, canvas.clientWidth);
+            const ch = Math.max(1, canvas.clientHeight);
+            const dpr = window.devicePixelRatio || 1;
+            if (canvas.width !== Math.round(cw * dpr)) { canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr); }
+            const ctx = canvas.getContext("2d")!;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, cw, ch);
+
+            const an = analyser.current;
+            const { vals, peaks } = state.current;
+            if (an) {
+                an.getByteFrequencyData(freq);
+                const bins = freq.length;
+                for (let i = 0; i < N; i++) {
+                    // log-ish frequency mapping (bass left → treble right), top 70% of bins
+                    const lo = Math.floor(Math.pow(i / N, 1.7) * bins * 0.7);
+                    const hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / N, 1.7) * bins * 0.7));
+                    let m = 0;
+                    for (let b = lo; b < hi && b < bins; b++) if (freq[b] > m) m = freq[b];
+                    const target = m / 255;
+                    // rise fast, fall slow
+                    vals[i] = target > vals[i] ? target : vals[i] * 0.86 + target * 0.14;
+                    if (vals[i] > peaks[i]) peaks[i] = vals[i];
+                    else peaks[i] = Math.max(0, peaks[i] - 0.009);
+                }
+            } else {
+                for (let i = 0; i < N; i++) { vals[i] *= 0.9; peaks[i] = Math.max(peaks[i] - 0.01, vals[i]); }
+            }
+
+            const baseline = ch * 0.7;
+            const maxBar = ch * 0.64;
+            const gap = 2;
+            const bw = (cw - gap * (N + 1)) / N;
+
+            for (let i = 0; i < N; i++) {
+                const v = vals[i];
+                const bh = Math.max(2, v * maxBar);
+                const x = gap + i * (bw + gap);
+
+                // fire gradient: red base → orange → yellow/white hot tip (taller = hotter)
+                const grad = ctx.createLinearGradient(0, baseline - bh, 0, baseline);
+                grad.addColorStop(0, `hsl(${52 - v * 8}, 100%, ${Math.min(96, 60 + v * 38)}%)`);
+                grad.addColorStop(0.45, "hsl(35, 100%, 55%)");
+                grad.addColorStop(1, "hsl(12, 100%, 46%)");
+                ctx.fillStyle = grad;
+                ctx.fillRect(x, baseline - bh, bw, bh);
+
+                // glow on hot tips
+                if (v > 0.55) {
+                    ctx.shadowColor = "rgba(255,200,90,0.8)";
+                    ctx.shadowBlur = 8;
+                    ctx.fillRect(x, baseline - bh, bw, 3);
+                    ctx.shadowBlur = 0;
+                }
+
+                // falling peak cap
+                const ph = Math.max(2, peaks[i] * maxBar);
+                ctx.fillStyle = "rgba(255,244,214,0.92)";
+                ctx.fillRect(x, baseline - ph - 2, bw, 2);
+
+                // faded reflection below the baseline (the "waves")
+                const refl = ctx.createLinearGradient(0, baseline, 0, baseline + bh * 0.55);
+                refl.addColorStop(0, "hsla(28, 100%, 52%, 0.22)");
+                refl.addColorStop(1, "hsla(12, 100%, 46%, 0)");
+                ctx.fillStyle = refl;
+                ctx.fillRect(x, baseline, bw, bh * 0.55);
+            }
+
+            rafRef.current = requestAnimationFrame(draw);
+        };
+        rafRef.current = requestAnimationFrame(draw);
+        const onVis = () => { if (document.hidden) cancelAnimationFrame(rafRef.current); else if (running) rafRef.current = requestAnimationFrame(draw); };
+        document.addEventListener("visibilitychange", onVis);
+        return () => { running = false; cancelAnimationFrame(rafRef.current); document.removeEventListener("visibilitychange", onVis); };
+    }, [analyser]);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            onClick={onClick}
+            onContextMenu={onContextMenu}
+            className="absolute inset-0 z-10 size-full cursor-pointer"
+        />
+    );
 }
