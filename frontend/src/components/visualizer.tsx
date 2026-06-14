@@ -63,9 +63,12 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
 
         async function init() {
             try {
-                const [bcMod, presetsMod] = await Promise.all([
+                const [bcMod, baseModule, ...extraModules] = await Promise.all([
                     import("butterchurn"),
                     import("butterchurn-presets"),
+                    import("butterchurn-presets/lib/butterchurnPresetsExtra.min.js"),
+                    import("butterchurn-presets/lib/butterchurnPresetsExtra2.min.js"),
+                    import("butterchurn-presets/lib/butterchurnPresetsMD1.min.js"),
                 ]);
                 if (cancelled) return;
 
@@ -75,11 +78,17 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 const ButterchurnClass = (bcMod as any).default as {
                     createVisualizer: (a: AudioContext | null, c: HTMLCanvasElement, o: Record<string, unknown>) => BcVisualizer;
                 };
-                // butterchurn-presets CJS: exports a class with static getPresets()
-                // Dynamic ESM import wraps CJS as { default: PresetsClass }
+                // butterchurn-presets CJS: exports a class with static getPresets().
+                // Merge base pack + extra packs for ~400+ presets total.
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const PresetsClass = (presetsMod as any).default as { getPresets: () => Record<string, object> };
-                const presets = PresetsClass.getPresets();
+                const presets: Record<string, object> = {};
+                for (const mod of [baseModule, ...extraModules]) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const cls = (mod as any).default as { getPresets?: () => Record<string, object> };
+                    if (typeof cls?.getPresets === "function") {
+                        Object.assign(presets, cls.getPresets());
+                    }
+                }
                 presetMapRef.current = presets;
                 presetKeysRef.current = Object.keys(presets);
 
