@@ -78,6 +78,10 @@ def _load_features() -> pd.DataFrame:
     if not config.FEATURES_PARQUET.exists():
         raise FileNotFoundError("Run analyze first (no features.parquet).")
     df = pd.read_parquet(config.FEATURES_PARQUET)
+    # Guard against duplicate index labels: a duplicated id makes df.loc[id]
+    # return a DataFrame, turning row values into Series and breaking the
+    # scalar comparisons in the sequencer ("truth value of a Series is ambiguous").
+    df = df[~df.index.duplicated(keep="first")]
     return df.dropna(subset=["camelot", "bpm", "energy_n", "groove_n"])
 
 
@@ -127,8 +131,11 @@ def order_for_ids(track_ids: list[str]) -> tuple[dict, list[str], list[str]]:
     them (they just won't carry analytics).
     """
     df = _load_features()
-    present = [t for t in track_ids if t in df.index]
-    missing = [t for t in track_ids if t not in df.index]
+    # de-dupe while preserving order — a playlist can list the same track twice.
+    seen: set[str] = set()
+    uniq = [t for t in track_ids if not (t in seen or seen.add(t))]
+    present = [t for t in uniq if t in df.index]
+    missing = [t for t in uniq if t not in df.index]
     result = result_from_df(df.loc[present])
     return result, [t["id"] for t in result["tracks"]], missing
 

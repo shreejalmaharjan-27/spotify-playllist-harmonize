@@ -68,13 +68,13 @@ export function PlaylistPicker({ trigger }: { trigger?: React.ReactNode }) {
           )}
           <CommandEmpty>No playlists found.</CommandEmpty>
           {playlists && (
-            <CommandGroup heading="Your library">
+            <CommandGroup heading="Your library" className="space-y-1 p-2">
               {playlists.map((p) => (
                 <CommandItem
                   key={p.id}
                   value={p.name + p.id}
                   onSelect={() => pick(p)}
-                  className="gap-3"
+                  className="gap-3 rounded-lg px-2 py-2.5 data-[selected=true]:bg-accent"
                 >
                   {p.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
