@@ -115,12 +115,36 @@ def analyze_file(path_str: str, track_id: str) -> dict | None:
             signal.alarm(0)
 
 
+def _intro_outro(curve) -> tuple[float, float]:
+    """Energy at the very start and very end of a track, from its energy curve.
+
+    These drive boundary-aware mixing: we match the OUTRO energy of one song to
+    the INTRO energy of the next. A song that starts cold (e.g. full-volume
+    vocal from bar 1) has a high intro energy and so won't be placed after a
+    soft outro."""
+    if not curve:
+        return 0.0, 0.0
+    k = max(1, min(config.INTRO_OUTRO_POINTS, len(curve) // 2))
+    return float(np.mean(curve[:k])), float(np.mean(curve[-k:]))
+
+
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     """Scale energy & groove to 0..1 across the library for stable weighting."""
     for col in ("energy", "groove"):
         lo, hi = df[col].quantile(0.05), df[col].quantile(0.95)
         rng = (hi - lo) or 1.0
         df[col + "_n"] = ((df[col] - lo) / rng).clip(0, 1)
+    # intro/outro are naturally quieter than mid-song, so scaling them by the
+    # whole-song energy range would crush them to ~0. Scale them against the
+    # combined intro+outro distribution instead, so a relatively loud start
+    # ("cold open") reads high and a soft fade-out reads low — and the two are on
+    # the same boundary scale for matching.
+    if "intro_energy" in df and "outro_energy" in df:
+        both = pd.concat([df["intro_energy"], df["outro_energy"]])
+        lo, hi = both.quantile(0.05), both.quantile(0.95)
+        rng = (hi - lo) or 1.0
+        for col in ("intro_energy", "outro_energy"):
+            df[col + "_n"] = ((df[col] - lo) / rng).clip(0, 1)
     return df
 
 
@@ -138,6 +162,10 @@ def _rebuild_parquet(meta: pd.DataFrame) -> pd.DataFrame:
     if not feats:
         return pd.DataFrame()
     df = pd.DataFrame(feats).set_index("id")
+    # derive intro/outro energy from the stored curve (no audio re-load needed)
+    io = df["energy_curve"].apply(_intro_outro)
+    df["intro_energy"] = [x[0] for x in io]
+    df["outro_energy"] = [x[1] for x in io]
     cols = {"Track URI": "uri", "Track Name": "name", "Artist Name(s)": "artists"}
     df = df.join(meta[list(cols)].rename(columns=cols))
     df["artists"] = df["artists"].astype(str).str.replace(";", ", ")

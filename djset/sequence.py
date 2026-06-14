@@ -41,10 +41,14 @@ def _step_cost(cur: pd.Series, cand: pd.Series, target_e: float) -> float:
     w = config.WEIGHTS
     key = harmonic_distance(cur["camelot"], cand["camelot"])
     tempo = _tempo_distance(cur["bpm"], cand["bpm"])
-    e_smooth = abs(cur["energy_n"] - cand["energy_n"])
+    # Boundary-aware energy: match the OUTRO of the current track to the INTRO of
+    # the candidate (fall back to whole-song energy if the columns are absent).
+    cur_out = cur.get("outro_energy_n", cur["energy_n"])
+    cand_in = cand.get("intro_energy_n", cand["energy_n"])
+    e_boundary = abs(cur_out - cand_in)
     e_curve = abs(cand["energy_n"] - target_e)
     groove = abs(cur["groove_n"] - cand["groove_n"])
-    return (w["key"] * key + w["tempo"] * tempo + w["energy_smooth"] * e_smooth
+    return (w["key"] * key + w["tempo"] * tempo + w["energy_boundary"] * e_boundary
             + w["energy_curve"] * e_curve + w["groove"] * groove)
 
 

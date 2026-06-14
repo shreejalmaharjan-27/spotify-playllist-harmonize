@@ -11,6 +11,7 @@ import { EnergyArc } from "@/components/energy-arc";
 import { NowProgress } from "@/components/now-progress";
 import { PlaylistPicker } from "@/components/playlist-picker";
 import { Transport } from "@/components/transport";
+import { TransitionView } from "@/components/transition-view";
 import { UpNext } from "@/components/up-next";
 import { Waveform } from "@/components/waveform";
 import { useLive } from "@/lib/useSocket";
@@ -128,6 +129,13 @@ export default function NowPlayingPage() {
             <CardLabel>current track · waveform</CardLabel>
             <div className="mt-3">
               <Waveform peaks={now?.curves?.waveform ?? []} now={now} />
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <CardLabel>transition · outro → next intro</CardLabel>
+            <div className="mt-3">
+              <TransitionView now={now} next={upnext[0] ?? null} />
             </div>
           </Card>
 

@@ -286,6 +286,13 @@ def api_coverage(playlist_id: str | None = None):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/curves/{track_id}")
+def api_curves(track_id: str):
+    """Waveform + energy curve for one track (for the transition preview)."""
+    f = _features_for(track_id)
+    return {"waveform": f.get("waveform", []), "energy_curve": f.get("energy_curve", [])}
+
+
 @app.get("/api/jobs/status")
 def api_job_status():
     return jobs.snapshot()

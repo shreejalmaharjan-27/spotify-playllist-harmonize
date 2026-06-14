@@ -32,6 +32,7 @@ ENERGY_CURVE_POINTS = 100    # downsampled per-track energy curve for the UI
 WAVEFORM_POINTS = 400        # downsampled waveform peaks for the UI
 ANALYZE_MAX_SECONDS = 420    # only load the first ~7 min (covers songs; caps mixes)
 ANALYZE_TIMEOUT_SEC = 90     # hard per-file cap; skip a track that hangs ffmpeg
+INTRO_OUTRO_POINTS = 8       # curve points (~first/last 8%) used as intro/outro energy
 
 # Download settings
 AUDIO_EXT = "m4a"
@@ -43,8 +44,8 @@ DURATION_TOLERANCE = 0.15    # reject yt matches off by >15% from Spotify length
 WEIGHTS = {
     "key": 1.0,        # Camelot harmonic distance (the seamless-blend axis)
     "tempo": 0.6,      # BPM proximity (with half/double-time equivalence)
-    "energy_curve": 1.2,   # follow the target build/drop arc (the dopamine)
-    "energy_smooth": 0.7,  # avoid jarring energy jumps between neighbours
+    "energy_curve": 1.2,    # follow the target build/drop arc (the dopamine)
+    "energy_boundary": 1.0, # match current OUTRO energy to candidate INTRO energy
     "groove": 0.4,     # danceability/pulse-clarity continuity
 }
 TEMPO_CAP_BPM = 12.0   # tempo difference (BPM) that counts as "fully far"
