@@ -1,0 +1,21 @@
+# Reproduces the exact analysis stack (pthreads OpenBLAS + numba 0.61) so the
+# Apple Silicon librosa segfault stays fixed inside the container too.
+FROM condaforge/miniforge3:latest
+
+WORKDIR /app
+
+# Create the conda env first so it caches across code changes.
+COPY environment.yml .
+RUN conda env create -f environment.yml && conda clean -afy
+
+# App code (data is NOT copied — it's a bind mount at /data).
+COPY djset ./djset
+COPY cli.py .
+
+ENV DJSET_DATA=/data \
+    DJSET_WEB_URL=http://localhost:3000 \
+    DJSET_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+EXPOSE 8000
+CMD ["conda", "run", "--no-capture-output", "-n", "djset", \
+     "uvicorn", "djset.server:app", "--host", "0.0.0.0", "--port", "8000"]

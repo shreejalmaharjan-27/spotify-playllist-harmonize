@@ -97,44 +97,59 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def run(limit: int | None = None, workers: int | None = None) -> pd.DataFrame:
-    config.ensure_dirs()
-    meta = pd.read_csv(config.find_csv())
-    meta["id"] = meta["Track URI"].map(config.track_id)
-    meta = meta.set_index("id")
+def _rebuild_parquet(meta: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate ALL cached per-track feature jsons into features.parquet.
 
-    jobs = []
-    for path in sorted(config.AUDIO_DIR.glob("*.*")):
-        tid = path.stem
-        if tid in meta.index:
-            jobs.append((str(path), tid))
-    if limit:
-        jobs = jobs[:limit]
-
-    print(f"Analyzing {len(jobs)} tracks...")
+    Reading every cache file (not just this run's) keeps the parquet correct
+    when analysis is run incrementally (e.g. per playlist)."""
     feats = []
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(analyze_file, p, t): t for p, t in jobs}
-        for i, fut in enumerate(as_completed(futures), 1):
-            res = fut.result()
-            if res:
-                feats.append(res)
-            if i % 25 == 0 or i == len(jobs):
-                print(f"  [{i}/{len(jobs)}] analyzed")
-
+    for jf in sorted(config.FEATURES_DIR.glob("*.json")):
+        try:
+            feats.append(json.loads(jf.read_text()))
+        except Exception:
+            continue
     if not feats:
-        print("No features extracted.")
         return pd.DataFrame()
-
     df = pd.DataFrame(feats).set_index("id")
-    # attach human metadata from the CSV
     cols = {"Track URI": "uri", "Track Name": "name", "Artist Name(s)": "artists"}
     df = df.join(meta[list(cols)].rename(columns=cols))
     df["artists"] = df["artists"].astype(str).str.replace(";", ", ")
     df = _normalize(df)
-
-    # store curves separately so parquet stays tidy; keep scalars in parquet
     scalar_cols = [c for c in df.columns if c not in ("energy_curve", "waveform")]
     df[scalar_cols].to_parquet(config.FEATURES_PARQUET)
+    return df
+
+
+def run(limit: int | None = None, workers: int | None = None,
+        track_ids: list[str] | None = None, on_progress=None) -> pd.DataFrame:
+    """Analyze downloaded audio. If track_ids is given, only those tracks.
+    on_progress(done, total, msg) streams status. The parquet is rebuilt from
+    all cached features afterwards so incremental runs accumulate."""
+    config.ensure_dirs()
+    meta = pd.read_csv(config.find_csv())
+    meta["id"] = meta["Track URI"].map(config.track_id)
+    meta = meta.set_index("id")
+    wanted = set(track_ids) if track_ids is not None else None
+
+    jobs = []
+    for path in sorted(config.AUDIO_DIR.glob("*.*")):
+        tid = path.stem
+        if tid in meta.index and (wanted is None or tid in wanted):
+            jobs.append((str(path), tid))
+    if limit:
+        jobs = jobs[:limit]
+
+    total = len(jobs)
+    print(f"Analyzing {total} tracks...")
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(analyze_file, p, t): t for p, t in jobs}
+        for i, fut in enumerate(as_completed(futures), 1):
+            fut.result()
+            if i % 25 == 0 or i == total:
+                print(f"  [{i}/{total}] analyzed")
+            if on_progress:
+                on_progress(i, total, "analyzing audio")
+
+    df = _rebuild_parquet(meta)
     print(f"Saved {len(df)} rows -> {config.FEATURES_PARQUET.name}")
     return df

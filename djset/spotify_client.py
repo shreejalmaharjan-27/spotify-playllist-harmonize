@@ -1,39 +1,25 @@
-"""Spotify auth, playlist creation, and playback control (Premium auto-DJ).
+"""Spotify playlist listing and playback control (Premium auto-DJ).
 
 The Web API can't beatmatch or crossfade audio — it controls *which* track
-plays and *when*. We start playback with the DJ-ordered URI list and let
-Spotify's in-app Crossfade setting do the physical blend.
+plays and *when*. We start playback with the DJ-ordered URI list (no new
+playlist is created) and let Spotify's in-app Crossfade do the physical blend.
+Auth lives in auth.py; this module just consumes a ready client.
 """
 from __future__ import annotations
 
-import json
-
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 
-from . import config
+from .auth import get_client
 
-SCOPE = (
-    "playlist-modify-public playlist-modify-private "
-    "user-modify-playback-state user-read-playback-state "
-    "user-read-currently-playing"
-)
+# Sentinel id for the "Liked Songs" virtual playlist.
+LIKED_SONGS_ID = "__liked__"
 
 
 def client() -> spotipy.Spotify:
-    config.load_env()
-    auth = SpotifyOAuth(
-        scope=SCOPE,
-        cache_path=str(config.ROOT / ".spotipy_cache"),
-        open_browser=True,
-    )
-    return spotipy.Spotify(auth_manager=auth, requests_timeout=15, retries=3)
-
-
-def load_set() -> dict:
-    if not config.SET_ORDER_JSON.exists():
-        raise FileNotFoundError("Run sequence first (no set_order.json).")
-    return json.loads(config.SET_ORDER_JSON.read_text())
+    sp = get_client()
+    if sp is None:
+        raise RuntimeError("Not authenticated with Spotify. Visit /auth/login.")
+    return sp
 
 
 def pick_device(sp: spotipy.Spotify) -> str | None:
@@ -44,32 +30,63 @@ def pick_device(sp: spotipy.Spotify) -> str | None:
     return (active or devices[0])["id"]
 
 
-def create_playlist(sp: spotipy.Spotify, name: str = "DJ Set (harmonic)") -> str:
-    data = load_set()
-    uris = [t["uri"] for t in data["tracks"]]
-    user_id = sp.current_user()["id"]
-    pl = sp.user_playlist_create(
-        user=user_id, name=name, public=True,
-        description=f"Harmonic DJ ordering of {len(uris)} tracks "
-                    f"({data['compatible_pct']}% key-compatible). Turn on Crossfade ~10s.",
-    )
-    pid = pl["id"]
-    for i in range(0, len(uris), 100):
-        sp.playlist_add_items(pid, uris[i:i + 100])
-    print(f"Created playlist '{name}' with {len(uris)} tracks: {pl['external_urls']['spotify']}")
-    return pid
+def list_playlists(sp: spotipy.Spotify) -> list[dict]:
+    """The user's playlists for the picker, with Liked Songs pinned first."""
+    liked_total = sp.current_user_saved_tracks(limit=1).get("total", 0)
+    out = [{
+        "id": LIKED_SONGS_ID, "name": "Liked Songs", "count": liked_total,
+        "image": None, "owner": "you",
+    }]
+    res = sp.current_user_playlists(limit=50)
+    while res:
+        for p in res["items"]:
+            if not p:
+                continue
+            out.append({
+                "id": p["id"], "name": p["name"],
+                "count": p["tracks"]["total"],
+                "image": p["images"][0]["url"] if p.get("images") else None,
+                "owner": p["owner"]["display_name"],
+            })
+        res = sp.next(res) if res.get("next") else None
+    return out
 
 
-def start_playback(sp: spotipy.Spotify, device_id: str | None = None,
-                   start_pos: int = 0) -> None:
-    data = load_set()
-    uris = [t["uri"] for t in data["tracks"]][start_pos:]
+def playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
+    if playlist_id == LIKED_SONGS_ID:
+        return _liked_track_ids(sp)
+    ids, res = [], sp.playlist_items(
+        playlist_id, fields="items(track(id)),next", additional_types=["track"])
+    while res:
+        for it in res["items"]:
+            tr = it.get("track")
+            if tr and tr.get("id"):
+                ids.append(tr["id"])
+        res = sp.next(res) if res.get("next") else None
+    return ids
+
+
+def _liked_track_ids(sp: spotipy.Spotify) -> list[str]:
+    ids, res = [], sp.current_user_saved_tracks(limit=50)
+    while res:
+        for it in res["items"]:
+            tr = it.get("track")
+            if tr and tr.get("id"):
+                ids.append(tr["id"])
+        res = sp.next(res) if res.get("next") else None
+    return ids
+
+
+def start_playback_uris(sp: spotipy.Spotify, uris: list[str],
+                        device_id: str | None = None) -> None:
+    """Play the given ordered track URIs on the active (desktop) device.
+
+    No playlist is created — Spotify just plays the URI list in order.
+    """
     device_id = device_id or pick_device(sp)
     if not device_id:
         raise RuntimeError("No active Spotify device. Open the Spotify desktop app and play once.")
-    # Web API caps context size; 700+ URIs is fine in practice for uris=.
-    sp.start_playback(device_id=device_id, uris=uris[:700])
-    print(f"Playback started on device {device_id} at position {start_pos}.")
+    sp.start_playback(device_id=device_id, uris=uris[:700])  # Web API context cap
 
 
 def now_playing(sp: spotipy.Spotify) -> dict | None:

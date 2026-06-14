@@ -74,14 +74,17 @@ def build_order(df: pd.DataFrame) -> list[str]:
     return order
 
 
-def run() -> dict:
+def _load_features() -> pd.DataFrame:
     if not config.FEATURES_PARQUET.exists():
         raise FileNotFoundError("Run analyze first (no features.parquet).")
     df = pd.read_parquet(config.FEATURES_PARQUET)
-    df = df.dropna(subset=["camelot", "bpm", "energy_n", "groove_n"])
+    return df.dropna(subset=["camelot", "bpm", "energy_n", "groove_n"])
+
+
+def result_from_df(df: pd.DataFrame) -> dict:
+    """Sequence an analyzed DataFrame into the dashboard set payload."""
     if df.empty:
         raise ValueError("No analyzed tracks to sequence.")
-
     order = build_order(df)
     ordered = df.loc[order]
 
@@ -107,15 +110,34 @@ def run() -> dict:
     dists = [harmonic_distance(tracks[i - 1]["camelot"], tracks[i]["camelot"])
              for i in range(1, len(tracks))]
     compatible = sum(1 for d in dists if d <= 1.0)
-    result = {
+    return {
         "count": len(tracks),
         "compatible_pct": round(100 * compatible / max(1, len(dists)), 1),
         "target_curve": [round(float(x), 3) for x in _target_curve(len(tracks))],
         "actual_curve": [t["energy"] for t in tracks],
         "tracks": tracks,
     }
+
+
+def order_for_ids(track_ids: list[str]) -> tuple[dict, list[str], list[str]]:
+    """Order the analyzed subset of a selected playlist.
+
+    Returns (set_payload, present_ids_in_order, missing_ids). missing_ids are
+    playlist tracks we have no local analysis for; the caller can still queue
+    them (they just won't carry analytics).
+    """
+    df = _load_features()
+    present = [t for t in track_ids if t in df.index]
+    missing = [t for t in track_ids if t not in df.index]
+    result = result_from_df(df.loc[present])
+    return result, [t["id"] for t in result["tracks"]], missing
+
+
+def run() -> dict:
+    """Offline: sequence the whole analyzed library to data/set_order.json."""
+    result = result_from_df(_load_features())
     config.SET_ORDER_JSON.write_text(json.dumps(result, indent=2))
-    print(f"Sequenced {len(tracks)} tracks. "
+    print(f"Sequenced {result['count']} tracks. "
           f"{result['compatible_pct']}% of transitions are key-compatible.")
     print(f"Saved -> {config.SET_ORDER_JSON.name}")
     return result

@@ -79,15 +79,22 @@ def _download_one(row: dict) -> dict:
     return {"id": tid, "name": name, "status": "downloaded", "path": str(got)}
 
 
-def run(limit: int | None = None, workers: int = 4) -> list[dict]:
+def run(limit: int | None = None, workers: int = 4,
+        track_ids: list[str] | None = None, on_progress=None) -> list[dict]:
+    """Download library audio. If track_ids is given, only those tracks
+    (e.g. a selected playlist). on_progress(done, total, msg) streams status."""
     config.ensure_dirs()
     df = pd.read_csv(config.find_csv())
     rows = df.to_dict("records")
+    if track_ids is not None:
+        wanted = set(track_ids)
+        rows = [r for r in rows if config.track_id(r["Track URI"]) in wanted]
     if limit:
         rows = rows[:limit]
 
     results: list[dict] = []
     done = 0
+    total = len(rows)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_download_one, r): r for r in rows}
         for fut in as_completed(futures):
@@ -95,7 +102,9 @@ def run(limit: int | None = None, workers: int = 4) -> list[dict]:
             results.append(res)
             done += 1
             flag = {"downloaded": "+", "cached": ".", }.get(res["status"], "x")
-            print(f"[{done}/{len(rows)}] {flag} {res['status']:>12}  {res['name'][:48]}")
+            print(f"[{done}/{total}] {flag} {res['status']:>12}  {res['name'][:48]}")
+            if on_progress:
+                on_progress(done, total, f"{res['status']}: {res['name'][:40]}")
 
     config.DOWNLOAD_LOG.write_text(json.dumps(results, indent=2))
     ok = sum(1 for r in results if r["status"] in ("downloaded", "cached"))

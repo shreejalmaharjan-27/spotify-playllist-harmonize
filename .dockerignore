@@ -1,0 +1,10 @@
+data
+frontend
+.git
+.venv
+__pycache__
+*.pyc
+.cache
+.spotipy_cache
+.DS_Store
+README.md

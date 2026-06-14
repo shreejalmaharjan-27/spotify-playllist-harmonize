@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DJSET_DATA: /data
+      DJSET_WEB_URL: http://localhost:3000
+      DJSET_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      # Music + features + token live on the HOST, never in the image.
+      - ./data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped

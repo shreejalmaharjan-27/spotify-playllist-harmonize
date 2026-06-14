@@ -1,62 +1,73 @@
-# DJ-Set Auto-Mixer + Live Dashboard
+# DJ-Set Auto-Mixer
 
-Turns ~825 favourite songs into a **harmonically-mixed DJ set** (Camelot key matching +
-half/double-time tempo bridges + a build-and-drop energy arc), drives Spotify playback through
-it, and shows a live **second-monitor dashboard** with now-playing, up-next, the set's energy
-arc, a waveform, and a Camelot wheel.
+Turns your Spotify playlists into a **harmonically-mixed DJ set** (Camelot key matching +
+half/double-time tempo bridges + a build-and-drop energy arc), drives playback through it, and
+shows a clean **Next.js dashboard** (now-playing, up-next, energy arc, waveform, Camelot wheel)
+that's nice to watch on a second monitor.
 
-The Spotify Web API can't beatmatch/crossfade audio — the "DJ magic" here is the **ordering**
-and the **visuals**. Turn on Spotify's in-app **Crossfade (~8–12s)** for the physical blend.
+The Spotify Web API can't beatmatch/crossfade audio — the "DJ magic" here is the **ordering** and
+the **visuals**. Turn on Spotify's in-app **Crossfade (~8–12s)** for the physical blend. You need
+**Spotify Premium** and the **desktop app open** (active playback device).
 
-## Setup
+## Architecture
+
+```
+browser ──HTTP/WS──> api  (FastAPI :8000)  ──bind mount ./data:/data──> audio, features, token
+   │                       librosa pipeline · Spotify OAuth + control · jobs
+   └──────────────────> web (Next.js :3000)  shadcn UI; calls api via NEXT_PUBLIC_API_URL
+```
+
+The audio + analysis + auth token all live in **`./data` on the host** (a Docker bind mount), never
+in the image.
+
+## Run with Docker (recommended)
 
 ```bash
-# one-time env (stable numba + pthreads OpenBLAS — see "Apple Silicon" below)
-conda create -y -n djset --override-channels -c conda-forge \
-  python=3.11 "libopenblas=*=*pthreads*" "numba=0.61" "numpy=2.0" librosa pandas pyarrow
-conda run -n djset pip install soundfile spotipy fastapi uvicorn yt-dlp mutagen
+docker compose up --build      # web → http://localhost:3000, api → http://localhost:8000
 ```
 
-`.env` holds the Spotify app credentials (already present):
-```
-SPOTIFY_CLIENT_ID=...
-SPOTIFY_CLIENT_SECRET=...
-SPOTIPY_REDIRECT_URI=http://127.0.0.1:8888/callback
-```
-> Use `127.0.0.1`, not `localhost` — Spotify rejects `localhost` as "not secure". Add the exact
-> same URI in your app's dashboard (Settings → Redirect URIs).
+Put your library export CSV (e.g. `EN2.csv`) in `./data/`. Then in the app:
 
-## Pipeline (each stage is cached / resumable)
+1. **Settings → Connect Spotify.** First add `http://127.0.0.1:8000/auth/callback` to your Spotify
+   app's Redirect URIs (use `127.0.0.1`, not `localhost`).
+2. **Library →** Download all, then Analyze all (heavy one-time jobs, cached + resumable, shown with
+   live progress). DJ info only appears for *analyzed* tracks.
+3. **Now Playing → Choose playlist** (your playlists + Liked Songs). It sequences the analyzed
+   tracks and plays the ordered set on your desktop app — **no new playlist is created**.
+
+## Run locally without Docker
 
 ```bash
-conda run -n djset python cli.py download   # yt-dlp each song (medium quality) -> data/audio/
-conda run -n djset python cli.py analyze    # librosa features -> data/features/ + features.parquet
-conda run -n djset python cli.py sequence    # DJ ordering -> data/set_order.json + Spotify playlist
-conda run -n djset python cli.py serve       # dashboard at http://127.0.0.1:8000 + auto-DJ
+# one-time conda env (pinned stack — see "Apple Silicon" below)
+conda env create -f environment.yml
+
+# backend (terminal 1)
+conda run -n djset uvicorn djset.server:app --port 8000
+# frontend (terminal 2)
+cd frontend && pnpm install && pnpm dev      # http://localhost:3000
 ```
 
-Use `--limit N` on `download`/`analyze` to test on a subset first.
-
-For playback control you need **Spotify Premium** and the **desktop app open** (active device).
+The CLI still works for headless runs: `conda run -n djset python cli.py {download,analyze,sequence}`
+(`--limit N` to test on a subset).
 
 ## How the ordering works
 
-- **Key** — Spotify-free: we detect key from the audio (chroma) → Camelot code, and keep adjacent
-  tracks harmonically compatible (same / relative / ±1 neighbour on the wheel).
+- **Key** — detected from the audio (chroma) → Camelot code; adjacent tracks stay harmonically
+  compatible (same / relative / ±1 neighbour on the wheel).
 - **Tempo** — BPM proximity with **half/double-time equivalence**, so a 75-BPM R&B track can sit
   next to a 150-BPM house track (the bridge club DJs use).
 - **Energy arc** — a rising envelope + sine waves create multiple build-ups and drops across the
   session instead of a flat sort, for the dopamine peaks.
-- Greedy nearest-neighbour path minimises a weighted "DJ distance" while following the arc.
+- A greedy nearest-neighbour path minimises a weighted "DJ distance" while following the arc.
 
 ## Apple Silicon (arm64) note
 
 `librosa.beat.beat_track` and CQT chroma use numba-JIT code that **segfaults** on arm64 when two
 OpenMP runtimes collide (the `openmp_*` OpenBLAS build + llvm-openmp, made worse by a pip-installed
-numpy bundling its own OpenBLAS). Fixes baked in here:
+numpy bundling its own OpenBLAS). Fixes baked in:
 
-1. Build the env with the **pthreads** OpenBLAS (`libopenblas=*=*pthreads*`) and a **stable numba
-   0.61**, all from a single channel — never `pip install numpy` over it.
+1. `environment.yml` pins the **pthreads** OpenBLAS (`libopenblas=*=*pthreads*`) + **stable numba
+   0.61**, single channel — never `pip install numpy` over it. The Docker API image reuses it.
 2. `analyze.py` uses `librosa.feature.tempo` instead of `beat_track`'s crashing DP step.
 
 Refs: [llvm#61682](https://github.com/llvm/llvm-project/issues/61682),

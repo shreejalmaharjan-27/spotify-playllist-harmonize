@@ -1,0 +1,24 @@
+# Reproducible analysis stack. The pthreads OpenBLAS + numba 0.61 pin avoids the
+# Apple Silicon / arm64 OpenMP segfault in librosa's numba code. Do NOT pip
+# install numpy over this — it reintroduces a second OpenBLAS.
+name: djset
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - libopenblas=*=*pthreads*
+  - numba=0.61
+  - numpy=2.0
+  - librosa
+  - pandas
+  - pyarrow
+  - ffmpeg
+  - pip
+  - pip:
+      - soundfile
+      - spotipy
+      - fastapi
+      - "uvicorn[standard]"
+      - websockets
+      - yt-dlp
+      - mutagen

@@ -9,13 +9,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # --- data layout -----------------------------------------------------------
-DATA = ROOT / "data"
+# DJSET_DATA lets Docker point the cache at a bind-mounted volume (/data).
+DATA = Path(os.environ.get("DJSET_DATA", ROOT / "data"))
 AUDIO_DIR = DATA / "audio"
 FEATURES_DIR = DATA / "features"
 FEATURES_PARQUET = DATA / "features.parquet"
 SET_ORDER_JSON = DATA / "set_order.json"
 DOWNLOAD_LOG = DATA / "download_log.json"
-WEB_DIR = ROOT / "web"
+TOKEN_CACHE = DATA / ".spotipy_cache"
+
+# Web app origins allowed to call this API (comma-separated env override).
+CORS_ORIGINS = os.environ.get(
+    "DJSET_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+).split(",")
+# Where /auth/callback redirects back to after a successful login.
+WEB_APP_URL = os.environ.get("DJSET_WEB_URL", "http://localhost:3000")
 
 # Audio analysis settings
 SAMPLE_RATE = 22050          # mono resample target for librosa
@@ -41,15 +49,20 @@ ENERGY_WAVES = 6       # number of build/drop cycles across the whole set
 
 
 def find_csv() -> Path:
-    """Locate the playlist export CSV (case-insensitive, prefers EN2)."""
-    candidates = sorted(ROOT.glob("*.csv"))
+    """Locate the library CSV (case-insensitive, prefers EN2).
+
+    Looks in the data dir first (so it can live in the Docker bind mount),
+    then the project root.
+    """
+    search_dirs = [DATA, ROOT]
+    candidates = [c for d in search_dirs if d.exists() for c in sorted(d.glob("*.csv"))]
     for name in ("EN2.csv", "en2.csv"):
         for c in candidates:
             if c.name.lower() == name.lower():
                 return c
     if candidates:
         return candidates[0]
-    raise FileNotFoundError("No CSV found in project root")
+    raise FileNotFoundError("No library CSV found in data dir or project root")
 
 
 def load_env() -> None:
@@ -74,7 +87,7 @@ def load_env() -> None:
     for spotipy_key, our_key in alias.items():
         if not os.environ.get(spotipy_key) and os.environ.get(our_key):
             os.environ[spotipy_key] = os.environ[our_key]
-    os.environ.setdefault("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
+    os.environ.setdefault("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback")
 
 
 def track_id(uri: str) -> str:
