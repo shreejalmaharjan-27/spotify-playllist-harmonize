@@ -1,3 +1,5 @@
+allowBuilds:
+  core-js: set this to true or false
 # sharp (Next image optimisation) and unrs-resolver ship native build scripts.
 # We don't need them built in the container, so ignore them explicitly — this
 # keeps `pnpm install --frozen-lockfile` non-interactive and exit-0.

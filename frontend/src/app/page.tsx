@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { ListMusic, Music2, Radio } from "lucide-react";
+import { ListMusic, Music2, Radio, Sparkles, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,19 +13,101 @@ import { NowProgress } from "@/components/now-progress";
 import { PlaylistPicker } from "@/components/playlist-picker";
 import { Transport } from "@/components/transport";
 import { UpNext } from "@/components/up-next";
+import { Visualizer } from "@/components/visualizer";
 import { WaveDeck } from "@/components/wave-deck";
 import { useLive } from "@/lib/useSocket";
+import { useVisualizer } from "@/lib/visualizer-context";
 
 export default function NowPlayingPage() {
   const { now: nowMsg, set } = useLive();
   const now = nowMsg?.now ?? null;
   const pos = nowMsg?.pos ?? null;
-  // full remaining queue, derived from the set we already have + current position
   const upnext = set ? set.tracks.slice((pos ?? -1) + 1) : [];
   const notAuthed = nowMsg?.error === "not_authenticated";
+  const { vizMode, toggleVizMode } = useVisualizer();
+
+  // Keyboard shortcut: V toggles visualizer
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "v" || e.key === "V") {
+        // Don't toggle if typing in an input
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        toggleVizMode();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleVizMode]);
 
   if (notAuthed) return <ConnectPrompt />;
 
+  // ── Visualizer mode ──────────────────────────────────
+  if (vizMode) {
+    return (
+      <div className="flex h-full flex-col">
+        {/* Canvas area */}
+        <div className="relative flex-1">
+          <Visualizer now={now} />
+          {!now && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <Radio className="size-10 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">Nothing playing</p>
+                <p className="text-xs text-muted-foreground/60">press V to exit visualizer</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom bar */}
+        <div className="flex shrink-0 items-center gap-4 border-t border-border bg-card/60 px-5 py-2.5 backdrop-blur">
+          {/* Track info (left) */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {now?.album_art ? (
+              <img
+                src={now.album_art}
+                alt=""
+                className="size-10 shrink-0 rounded object-cover"
+              />
+            ) : (
+              <div className="flex size-10 shrink-0 items-center justify-center rounded bg-muted">
+                <Music2 className="size-4 text-muted-foreground" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">
+                {now?.name ?? "No track"}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {now?.artists ?? "—"}
+                {now?.camelot ? ` · ${now.camelot}` : ""}
+              </p>
+            </div>
+          </div>
+
+          {/* Transport (center) */}
+          <div className="shrink-0">
+            <Transport isPlaying={now?.is_playing} />
+          </div>
+
+          {/* Exit button (right) */}
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+            <span className="hidden text-xs text-muted-foreground/50 sm:inline">V to exit</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleVizMode}
+              title="Exit visualizer (V)"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Normal mode ──────────────────────────────────────
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
       <header className="flex items-center justify-between">
@@ -37,13 +120,24 @@ export default function NowPlayingPage() {
             </p>
           )}
         </div>
-        <PlaylistPicker
-          trigger={
-            <Button variant="secondary">
-              <ListMusic className="size-4" /> Choose playlist
-            </Button>
-          }
-        />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleVizMode}
+            title="Visualizer mode (V)"
+          >
+            <Sparkles className="size-4" />
+            <span className="ml-1.5 hidden sm:inline">Visualizer</span>
+          </Button>
+          <PlaylistPicker
+            trigger={
+              <Button variant="secondary">
+                <ListMusic className="size-4" /> Choose playlist
+              </Button>
+            }
+          />
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

@@ -286,6 +286,35 @@ def api_coverage(playlist_id: str | None = None):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/audio/{track_id}")
+def api_audio(track_id: str):
+    """Stream the cached audio file for a track.
+
+    Returns the .m4a file if it exists in the audio directory, with Range
+    header support so the browser can seek. Used by the Butterchurn visualizer
+    to decode audio locally for frequency analysis.
+    """
+    import mimetypes
+    from starlette.responses import FileResponse
+
+    # sanitize — only alphanumeric Spotify IDs and dots/extensions
+    safe = "".join(c for c in track_id if c.isalnum() or c in "._-")
+    if safe != track_id:
+        return JSONResponse({"error": "invalid track id"}, status_code=400)
+
+    path = config.AUDIO_DIR / f"{track_id}.m4a"
+    if not path.exists():
+        # try any extension
+        matches = list(config.AUDIO_DIR.glob(f"{track_id}.*"))
+        if not matches:
+            return JSONResponse({"error": "audio not cached"}, status_code=404)
+        path = matches[0]
+
+    mt, _ = mimetypes.guess_type(str(path))
+    return FileResponse(path, media_type=mt or "audio/mp4",
+                        headers={"Accept-Ranges": "bytes"})
+
+
 @app.get("/api/curves/{track_id}")
 def api_curves(track_id: str):
     """Waveform + energy curve + duration for one track (for the wave deck)."""
