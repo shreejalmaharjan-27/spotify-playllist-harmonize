@@ -288,9 +288,10 @@ def api_coverage(playlist_id: str | None = None):
 
 @app.get("/api/curves/{track_id}")
 def api_curves(track_id: str):
-    """Waveform + energy curve for one track (for the transition preview)."""
+    """Waveform + energy curve + duration for one track (for the wave deck)."""
     f = _features_for(track_id)
-    return {"waveform": f.get("waveform", []), "energy_curve": f.get("energy_curve", [])}
+    return {"waveform": f.get("waveform", []), "energy_curve": f.get("energy_curve", []),
+            "duration_sec": f.get("duration_sec", 0)}
 
 
 @app.get("/api/jobs/status")

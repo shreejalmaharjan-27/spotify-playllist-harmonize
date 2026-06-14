@@ -34,7 +34,9 @@ export const api = {
     post<{ ok?: boolean; error?: string }>(`/api/play_at/${pos}`),
 
   curves: (id: string) =>
-    get<{ waveform: number[]; energy_curve: number[] }>(`/api/curves/${id}`),
+    get<{ waveform: number[]; energy_curve: number[]; duration_sec: number }>(
+      `/api/curves/${id}`,
+    ),
 
   coverage: (playlistId?: string) =>
     get<Coverage>(`/api/coverage${playlistId ? `?playlist_id=${playlistId}` : ""}`),
