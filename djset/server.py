@@ -304,11 +304,18 @@ def api_audio(track_id: str):
 
     path = config.AUDIO_DIR / f"{track_id}.m4a"
     if not path.exists():
-        # try any extension
-        matches = list(config.AUDIO_DIR.glob(f"{track_id}.*"))
-        if not matches:
-            return JSONResponse({"error": "audio not cached"}, status_code=404)
-        path = matches[0]
+        # try other common extensions (yt-dlp can return webm, opus, etc.)
+        for ext in (".m4a", ".webm", ".opus", ".mp4", ".mkv", ".ogg", ".mp3"):
+            candidate = config.AUDIO_DIR / f"{track_id}{ext}"
+            if candidate.exists():
+                path = candidate
+                break
+        else:
+            # glob as last resort
+            matches = list(config.AUDIO_DIR.glob(f"{track_id}.*"))
+            if not matches:
+                return JSONResponse({"error": "audio not cached"}, status_code=404)
+            path = matches[0]
 
     mt, _ = mimetypes.guess_type(str(path))
     return FileResponse(path, media_type=mt or "audio/mp4",

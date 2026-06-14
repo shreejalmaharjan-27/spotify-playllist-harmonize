@@ -37,9 +37,25 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
     const rafRef = useRef(0);
     const presetIdxRef = useRef(0);
     const presetMapRef = useRef<Record<string, object> | null>(null);
+    const presetKeysRef = useRef<string[]>([]);
+    const activeKeyRef = useRef<string | null>(null);
+    const manualRef = useRef(false); // user manually picked → don't auto-cycle
     const flashRef = useRef({ text: "", until: 0 });
     const overlayRef = useRef<HTMLDivElement>(null);
     const [useBc, setUseBc] = useState<boolean | null>(null);
+    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+    const [search, setSearch] = useState("");
+    const [favs, setFavs] = useState<Set<string>>(() => loadSet("djset-viz-favs"));
+    const [blocked, setBlocked] = useState<Set<string>>(() => loadSet("djset-viz-blocked"));
+
+    // ── Favorites / blocked persistence ──────────────────
+    function loadSet(key: string) {
+        try { return new Set<string>(JSON.parse(localStorage.getItem(key) ?? "[]")); }
+        catch { return new Set<string>(); }
+    }
+    function saveSet(key: string, s: Set<string>) { try { localStorage.setItem(key, JSON.stringify([...s])); } catch { /* */ } }
+    const toggleFav = useCallback((k: string) => { setFavs((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); saveSet("djset-viz-favs", n); return n; }); }, []);
+    const toggleBlocked = useCallback((k: string) => { setBlocked((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); saveSet("djset-viz-blocked", n); return n; }); }, []);
 
     // ── Load Butterchurn + presets once ────────────────────
     useEffect(() => {
@@ -59,9 +75,13 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 const ButterchurnClass = (bcMod as any).default as {
                     createVisualizer: (a: AudioContext | null, c: HTMLCanvasElement, o: Record<string, unknown>) => BcVisualizer;
                 };
+                // butterchurn-presets CJS: exports a class with static getPresets()
+                // Dynamic ESM import wraps CJS as { default: PresetsClass }
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const presets = (presetsMod as any).default as Record<string, object>;
+                const PresetsClass = (presetsMod as any).default as { getPresets: () => Record<string, object> };
+                const presets = PresetsClass.getPresets();
                 presetMapRef.current = presets;
+                presetKeysRef.current = Object.keys(presets);
 
                 const canvas = canvasRef.current;
                 if (!canvas) return;
@@ -92,12 +112,13 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 });
                 bcRef.current = viz;
 
-                // Load first preset immediately so something is visible
-                const keys = Object.keys(presets);
+                // Load first preset immediately
+                const keys = presetKeysRef.current;
                 if (keys.length) {
                     presetIdxRef.current = 1;
+                    activeKeyRef.current = keys[0];
                     viz.loadPreset(presets[keys[0]], 0);
-                    showFlash("Butterchurn · " + keys[0].substring(0, 40));
+                    showFlash("▶ " + keys[0].substring(0, 45));
                 }
 
                 setUseBc(true);
@@ -142,18 +163,24 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 source.connect(gain!);        // muted → speakers
                 viz!.connectAudio(source);    // raw signal → Butterchurn FFT
 
-                const offset = (now!.progress_ms ?? 0) / 1000;
-                source.start(0, Math.min(offset, audioBuf.duration - 0.1));
+                // Start from 0 — the cached audio may have different timing
+                // than Spotify's stream. The visualizer just reacts to energy.
+                source.start(0);
                 sourceRef.current = source;
 
-                // Cycle preset on each track change
-                const presets = presetMapRef.current;
-                if (presets) {
-                    const keys = Object.keys(presets);
-                    const idx = presetIdxRef.current % keys.length;
-                    presetIdxRef.current = idx + 1;
-                    viz!.loadPreset(presets[keys[idx]], 0.15);
+                // Only auto-cycle if user hasn't manually picked a preset
+                if (!manualRef.current) {
+                    const presets = presetMapRef.current;
+                    const keys = presetKeysRef.current;
+                    if (presets && keys.length) {
+                        const idx = presetIdxRef.current % keys.length;
+                        presetIdxRef.current = idx + 1;
+                        activeKeyRef.current = keys[idx];
+                        viz!.loadPreset(presets[keys[idx]], 0.15);
+                    }
                 }
+                // Reset manual flag for next track: user can re-lock by clicking again
+                manualRef.current = false;
             } catch (err) {
                 console.warn("Butterchurn audio load failed:", err);
                 if (!cancelled) showFlash("no audio — idling");
@@ -225,17 +252,52 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
         return () => ro.disconnect();
     }, [useBc]);
 
-    // ── Click: cycle preset ───────────────────────────────
-    const handleClick = useCallback(() => {
+    // ── Click: cycle to next preset ───────────────────────
+    const cyclePreset = useCallback(() => {
         const presets = presetMapRef.current;
-        if (!presets) return;
-        const keys = Object.keys(presets);
-        if (!keys.length) return;
+        const keys = presetKeysRef.current;
+        if (!presets || !keys.length) return;
         const idx = presetIdxRef.current % keys.length;
+        const key = keys[idx];
         presetIdxRef.current = idx + 1;
-        bcRef.current?.loadPreset(presets[keys[idx]], 0.15);
-        showFlash(keys[idx].substring(0, 55));
+        activeKeyRef.current = key;
+        manualRef.current = true;
+        bcRef.current?.loadPreset(presets[key], 0.15);
+        showFlash(key.substring(0, 50));
     }, []);
+
+    // ── Select specific preset (context menu) ─────────────
+    const selectPreset = useCallback((key: string) => {
+        const presets = presetMapRef.current;
+        if (!presets || !presets[key]) return;
+        activeKeyRef.current = key;
+        manualRef.current = true;
+        bcRef.current?.loadPreset(presets[key], 0.15);
+        showFlash(key.substring(0, 50));
+        setCtxMenu(null);
+    }, []);
+
+    // ── Right-click: open context menu ────────────────────
+    const onContextMenu = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation(); // prevent the same event from closing the menu
+        setCtxMenu({ x: e.clientX, y: e.clientY });
+    }, []);
+
+    // Close context menu on any outside interaction, but NOT on
+    // clicks inside the menu itself (those go through our buttons).
+    useEffect(() => {
+        if (!ctxMenu) return;
+        const close = (e: Event) => {
+            // Ignore events whose target is inside the context menu
+            const el = e.target as HTMLElement | null;
+            if (el?.closest("[data-viz-menu]")) return;
+            setCtxMenu(null);
+        };
+        const opts = { capture: true } as const;
+        window.addEventListener("pointerdown", close, opts);
+        return () => window.removeEventListener("pointerdown", close, opts);
+    }, [ctxMenu]);
 
     function showFlash(text: string) {
         flashRef.current = { text, until: performance.now() + 2200 };
@@ -257,17 +319,102 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
 
     // ── Butterchurn ───────────────────────────────────────
     if (useBc) {
+        const allKeys = presetKeysRef.current;
+
+        // Filter + sort: blocked hidden, favs first, search filter
+        const s = search.toLowerCase().trim();
+        const visibleKeys = allKeys
+            .filter((k) => !blocked.has(k))
+            .filter((k) => !s || k.toLowerCase().includes(s))
+            .sort((a, b) => (favs.has(b) ? 1 : 0) - (favs.has(a) ? 1 : 0));
+
         return (
             <>
                 <canvas
                     ref={canvasRef}
-                    onClick={handleClick}
+                    onClick={cyclePreset}
+                    onContextMenu={onContextMenu}
                     className="absolute inset-0 size-full cursor-pointer"
                 />
+                {/* Block current preset — bottom-left float */}
+                <button
+                    onClick={() => { const k = activeKeyRef.current; if (k) toggleBlocked(k); }}
+                    title={activeKeyRef.current && blocked.has(activeKeyRef.current)
+                        ? "Unblock this preset"
+                        : "Block this preset (hide from list)"}
+                    className="absolute bottom-3 left-3 z-20 rounded-md bg-black/50 px-2 py-1 text-[11px] text-white/30 transition-opacity hover:bg-black/70 hover:text-white/90 hover:opacity-100"
+                >
+                    {activeKeyRef.current && blocked.has(activeKeyRef.current) ? "🚫 Blocked" : "🚫 Block"}
+                </button>
                 <div
                     ref={overlayRef}
                     className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 rounded-lg bg-black/70 px-4 py-1.5 text-center text-sm text-white opacity-0 transition-opacity"
                 />
+                {/* Context menu */}
+                {ctxMenu && (
+                    <div
+                        className="fixed inset-0 z-50"
+                        onClick={() => setCtxMenu(null)}
+                    >
+                        <div
+                            data-viz-menu
+                            className="absolute flex max-h-80 w-80 flex-col rounded-lg border border-border bg-card shadow-xl"
+                            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Search */}
+                            <div className="shrink-0 border-b border-border p-2">
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    placeholder="Search presets…"
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    className="w-full rounded border border-input bg-background px-2 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
+                                />
+                            </div>
+                            {/* Header */}
+                            <div className="shrink-0 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                                {s ? `${visibleKeys.length} matches` : `Presets · ${allKeys.length - blocked.size} shown`}
+                                {blocked.size > 0 && <span className="ml-1 opacity-60">({blocked.size} hidden)</span>}
+                            </div>
+                            {/* List */}
+                            <div className="flex-1 overflow-y-auto pb-1">
+                                {visibleKeys.length === 0 && (
+                                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                        {s ? "No matches" : "All blocked or loading…"}
+                                    </div>
+                                )}
+                                {visibleKeys.map((key) => (
+                                    <div key={key} className="group flex items-center gap-0.5 pr-1">
+                                        <button
+                                            onMouseDown={(e) => { e.preventDefault(); selectPreset(key); }}
+                                            className="flex-1 truncate rounded px-3 py-1 text-left text-xs text-foreground transition-colors hover:bg-accent"
+                                            title={key}
+                                        >
+                                            {favs.has(key) && <span className="mr-1">⭐</span>}
+                                            {key.substring(0, 55)}
+                                        </button>
+                                        <button
+                                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleFav(key); }}
+                                            title={favs.has(key) ? "Remove favorite" : "Add favorite"}
+                                            className="shrink-0 rounded p-0.5 text-xs opacity-30 transition-opacity hover:opacity-100 group-hover:opacity-60"
+                                        >
+                                            {favs.has(key) ? "⭐" : "☆"}
+                                        </button>
+                                        <button
+                                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleBlocked(key); }}
+                                            title={blocked.has(key) ? "Unblock" : "Block"}
+                                            className="shrink-0 rounded p-0.5 text-xs opacity-30 transition-opacity hover:opacity-100 group-hover:opacity-60"
+                                        >
+                                            {blocked.has(key) ? "🚫" : "✕"}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </>
         );
     }
