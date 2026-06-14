@@ -15,6 +15,7 @@ AUDIO_DIR = DATA / "audio"
 FEATURES_DIR = DATA / "features"
 FEATURES_PARQUET = DATA / "features.parquet"
 SET_ORDER_JSON = DATA / "set_order.json"
+ACTIVE_SET_JSON = DATA / "active_set.json"   # dashboard's current set, survives restarts
 DOWNLOAD_LOG = DATA / "download_log.json"
 TOKEN_CACHE = DATA / ".spotipy_cache"
 

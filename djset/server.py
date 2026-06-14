@@ -66,6 +66,28 @@ def _features_for(track_id: str) -> dict:
     return json.loads(cache.read_text()) if cache.exists() else {}
 
 
+def _save_active_set():
+    """Persist the active set so a container restart continues the same playlist."""
+    try:
+        config.ACTIVE_SET_JSON.write_text(
+            json.dumps({"set": STATE["set"], "missing": STATE["missing"]})
+        )
+    except Exception as e:
+        STATE["error"] = f"could not save set: {e}"
+
+
+def _restore_active_set():
+    """Reload the last selected set on startup (pos is re-derived from playback)."""
+    if config.ACTIVE_SET_JSON.exists():
+        try:
+            data = json.loads(config.ACTIVE_SET_JSON.read_text())
+            STATE["set"] = data.get("set")
+            STATE["missing"] = data.get("missing", [])
+            STATE["set_dirty"] = bool(STATE["set"])
+        except Exception:
+            pass
+
+
 def _set_payload() -> dict:
     s = STATE["set"]
     return {"type": "set", "count": s["count"], "compatible_pct": s["compatible_pct"],
@@ -113,6 +135,7 @@ async def dj_loop():
 async def _startup():
     global _loop
     _loop = asyncio.get_running_loop()
+    _restore_active_set()
     asyncio.create_task(dj_loop())
 
 
@@ -169,8 +192,13 @@ def api_select(playlist_id: str):
         if not ids:
             return JSONResponse({"error": "playlist has no tracks"}, status_code=400)
         result, ordered_ids, missing = sequence.order_for_ids(ids)
+        # attach album art so the up-next queue can show thumbnails
+        art = spotify_client.album_art_map(sp, ordered_ids)
+        for t in result["tracks"]:
+            t["album_art"] = art.get(t["id"])
         STATE["set"], STATE["missing"], STATE["pos"] = result, missing, None
         STATE["set_dirty"] = True
+        _save_active_set()
         uris = [f"spotify:track:{i}" for i in ordered_ids + missing]
         spotify_client.start_playback_uris(sp, uris)
         return {"ok": True, "ordered": len(ordered_ids), "missing": len(missing),

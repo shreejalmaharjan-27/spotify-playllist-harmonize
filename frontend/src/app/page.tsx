@@ -8,10 +8,10 @@ import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CamelotWheel } from "@/components/camelot-wheel";
 import { EnergyArc } from "@/components/energy-arc";
+import { NowProgress } from "@/components/now-progress";
 import { PlaylistPicker } from "@/components/playlist-picker";
 import { Transport } from "@/components/transport";
 import { Waveform } from "@/components/waveform";
-import { ms } from "@/lib/format";
 import { useLive } from "@/lib/useSocket";
 
 export default function NowPlayingPage() {
@@ -88,16 +88,7 @@ export default function NowPlayingPage() {
                     <p className="mt-2 text-sm text-primary">↳ {now.transition}</p>
                   )}
                   <div className="mt-auto pt-4">
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${progress * 100}%` }}
-                      />
-                    </div>
-                    <div className="mt-1.5 flex justify-between text-xs text-muted-foreground">
-                      <span>{ms(now.progress_ms)}</span>
-                      <span>{ms(now.duration_ms)}</span>
-                    </div>
+                    <NowProgress now={now} />
                   </div>
                 </div>
                 <div className="flex items-center">
@@ -153,16 +144,28 @@ export default function NowPlayingPage() {
                 )}
                 {upnext.map((t) => (
                   <div key={t.id} className="flex items-center gap-3 rounded-md p-2">
-                    <span className="w-9 shrink-0 text-sm font-semibold text-primary">
-                      {t.camelot}
-                    </span>
+                    {t.album_art ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={t.album_art}
+                        alt=""
+                        className="size-10 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded bg-muted">
+                        <Music2 className="size-4 text-muted-foreground" />
+                      </div>
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm">{t.name}</div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {t.artists} · {t.transition}
+                        {t.artists}
                       </div>
                     </div>
-                    <span className="text-xs text-muted-foreground">{t.bpm.toFixed(0)}</span>
+                    <div className="flex shrink-0 flex-col items-end">
+                      <span className="text-sm font-semibold text-primary">{t.camelot}</span>
+                      <span className="text-xs text-muted-foreground">{t.bpm.toFixed(0)} BPM</span>
+                    </div>
                   </div>
                 ))}
               </div>

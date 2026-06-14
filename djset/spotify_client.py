@@ -66,6 +66,17 @@ def playlist_track_ids(sp: spotipy.Spotify, playlist_id: str) -> list[str]:
     return ids
 
 
+def album_art_map(sp: spotipy.Spotify, ids: list[str]) -> dict[str, str | None]:
+    """track_id -> smallest album-art URL, for the up-next thumbnails."""
+    art: dict[str, str | None] = {}
+    for i in range(0, len(ids), 50):  # Spotify caps /tracks at 50 ids
+        for t in sp.tracks(ids[i:i + 50]).get("tracks", []):
+            if t and t.get("id"):
+                imgs = t["album"]["images"]
+                art[t["id"]] = imgs[-1]["url"] if imgs else None
+    return art
+
+
 def _liked_track_ids(sp: spotipy.Spotify) -> list[str]:
     ids, res = [], sp.current_user_saved_tracks(limit=50)
     while res:

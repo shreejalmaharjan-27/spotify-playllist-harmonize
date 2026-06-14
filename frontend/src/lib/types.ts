@@ -12,6 +12,7 @@ export interface Track {
   energy: number;
   groove: number;
   transition: string;
+  album_art?: string | null;
 }
 
 export interface Curves {
