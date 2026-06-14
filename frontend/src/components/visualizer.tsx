@@ -40,6 +40,7 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
     const presetKeysRef = useRef<string[]>([]);
     const activeKeyRef = useRef<string | null>(null);
     const manualRef = useRef(false); // user manually picked → don't auto-cycle
+    const clockRef = useRef({ progress: 0, at: 0, playing: false });
     const flashRef = useRef({ text: "", until: 0 });
     const overlayRef = useRef<HTMLDivElement>(null);
     const [useBc, setUseBc] = useState<boolean | null>(null);
@@ -80,7 +81,7 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
                 };
                 // butterchurn-presets CJS: exports a class with static getPresets().
                 // Merge base pack + extra packs for ~400+ presets total.
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
                 const presets: Record<string, object> = {};
                 for (const mod of [baseModule, ...extraModules]) {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,6 +142,20 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
         return () => { cancelled = true; };
     }, []);
 
+    // ── Sync playback clock from server progress (like WaveDeck) ──
+    useEffect(() => {
+        const c = clockRef.current;
+        const server = now?.progress_ms ?? 0;
+        const playing = now?.is_playing ?? false;
+        const local = c.playing ? c.progress + (performance.now() - c.at) : c.progress;
+        // Resync if track changed OR drift > 1.2s
+        if (Math.abs(server - local) > 1200) {
+            clockRef.current = { progress: server, at: performance.now(), playing };
+        } else {
+            clockRef.current.playing = playing;
+        }
+    }, [now?.id, now?.progress_ms, now?.is_playing]);
+
     // ── When track changes: fetch audio, decode, feed BC ──
     useEffect(() => {
         if (!useBc || !now?.id) return;
@@ -160,21 +175,41 @@ export function Visualizer({ now }: { now: NowPlaying | null }) {
 
             try {
                 const resp = await fetch(`${API_BASE}/api/audio/${now!.id}`);
-                if (!resp.ok) throw new Error(`audio fetch failed: ${resp.status}`);
+                if (!resp.ok) {
+                    const txt = await resp.text().catch(() => "");
+                    throw new Error(`${resp.status} ${txt}`);
+                }
                 const buf = await resp.arrayBuffer();
                 if (cancelled) return;
 
                 const audioBuf = await ctx!.decodeAudioData(buf);
                 if (cancelled) return;
 
+                console.log("Butterchurn audio loaded:",
+                    (audioBuf.duration).toFixed(1) + "s",
+                    audioBuf.numberOfChannels + "ch",
+                    audioBuf.sampleRate + "Hz");
+
                 const source = ctx!.createBufferSource();
                 source.buffer = audioBuf;
-                source.connect(gain!);        // muted → speakers
-                viz!.connectAudio(source);    // raw signal → Butterchurn FFT
 
-                // Start from 0 — the cached audio may have different timing
-                // than Spotify's stream. The visualizer just reacts to energy.
-                source.start(0);
+                // Exactly match the Butterchurn demo pattern:
+                // source → (node) → destination, BC taps into the node.
+                const churn = ctx!.createGain();
+                churn.gain.value = 1.0;
+                source.connect(churn);
+                churn.connect(gain!);         // muted→speakers (we hear Spotify)
+                viz!.connectAudio(churn);     // BC reads FFT from churn at full gain
+
+                // Seek to Spotify's current position (interpolated locally).
+                // Even with a 1-2s drift from different audio masters, this
+                // is far better than playing from 0.
+                const c = clockRef.current;
+                const serverOffset = c.playing
+                    ? (c.progress + (performance.now() - c.at)) / 1000
+                    : c.progress / 1000;
+                const seek = Math.max(0, Math.min(serverOffset, audioBuf.duration - 0.1));
+                source.start(0, seek);
                 sourceRef.current = source;
 
                 // Only auto-cycle if user hasn't manually picked a preset
