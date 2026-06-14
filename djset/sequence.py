@@ -1,0 +1,121 @@
+"""DJ ordering: build a harmonically-mixed set that follows an energy arc.
+
+This is the heart of the project. Instead of sorting on one axis (what
+sortbytune does), we walk a path through the library minimizing a weighted
+"DJ distance" between neighbours while steering the set's energy along a
+build-and-drop target curve so it lands the dopamine peaks.
+"""
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pandas as pd
+
+from . import config
+from .camelot import harmonic_distance, transition_label
+
+
+def _tempo_distance(t1: float, t2: float) -> float:
+    """BPM distance with half/double-time equivalence, normalized 0..1.
+
+    Lets a 75-BPM R&B track sit next to a 150-BPM house track (the bridge a
+    club DJ uses) by treating x, 2x and x/2 as equivalent tempos.
+    """
+    if not t1 or not t2:
+        return 1.0
+    cands = [abs(t1 - t2), abs(t1 - 2 * t2), abs(2 * t1 - t2)]
+    return min(min(cands) / config.TEMPO_CAP_BPM, 1.0)
+
+
+def _target_curve(n: int) -> np.ndarray:
+    """Rising envelope + sine waves -> multiple builds and drops across the set."""
+    p = np.linspace(0, 1, n)
+    envelope = 0.35 + 0.45 * p                      # overall lift across session
+    waves = 0.18 * (0.5 - 0.5 * np.cos(2 * np.pi * config.ENERGY_WAVES * p))
+    warmup = np.clip(p / 0.05, 0, 1)                # gentle first ~5%
+    return np.clip((envelope * 0.7 + waves) * warmup + 0.1 * (1 - warmup), 0, 1)
+
+
+def _step_cost(cur: pd.Series, cand: pd.Series, target_e: float) -> float:
+    w = config.WEIGHTS
+    key = harmonic_distance(cur["camelot"], cand["camelot"])
+    tempo = _tempo_distance(cur["bpm"], cand["bpm"])
+    e_smooth = abs(cur["energy_n"] - cand["energy_n"])
+    e_curve = abs(cand["energy_n"] - target_e)
+    groove = abs(cur["groove_n"] - cand["groove_n"])
+    return (w["key"] * key + w["tempo"] * tempo + w["energy_smooth"] * e_smooth
+            + w["energy_curve"] * e_curve + w["groove"] * groove)
+
+
+def build_order(df: pd.DataFrame) -> list[str]:
+    """Greedy nearest-neighbour path following the energy target curve."""
+    n = len(df)
+    target = _target_curve(n)
+    ids = df.index.tolist()
+
+    # start: the track closest to the warm-up target energy
+    start = (df["energy_n"] - target[0]).abs().idxmin()
+    order = [start]
+    used = {start}
+
+    for pos in range(1, n):
+        cur = df.loc[order[-1]]
+        te = target[pos]
+        best_id, best_cost = None, float("inf")
+        for tid in ids:
+            if tid in used:
+                continue
+            c = _step_cost(cur, df.loc[tid], te)
+            if c < best_cost:
+                best_cost, best_id = c, tid
+        order.append(best_id)
+        used.add(best_id)
+    return order
+
+
+def run() -> dict:
+    if not config.FEATURES_PARQUET.exists():
+        raise FileNotFoundError("Run analyze first (no features.parquet).")
+    df = pd.read_parquet(config.FEATURES_PARQUET)
+    df = df.dropna(subset=["camelot", "bpm", "energy_n", "groove_n"])
+    if df.empty:
+        raise ValueError("No analyzed tracks to sequence.")
+
+    order = build_order(df)
+    ordered = df.loc[order]
+
+    tracks = []
+    prev_cam = None
+    for i, (tid, row) in enumerate(ordered.iterrows()):
+        tracks.append({
+            "pos": i,
+            "id": tid,
+            "uri": row.get("uri", f"spotify:track:{tid}"),
+            "name": row.get("name", tid),
+            "artists": row.get("artists", ""),
+            "camelot": row["camelot"],
+            "key_name": row.get("key_name", ""),
+            "bpm": round(float(row["bpm"]), 1),
+            "energy": round(float(row["energy_n"]), 3),
+            "groove": round(float(row["groove_n"]), 3),
+            "transition": transition_label(prev_cam, row["camelot"]) if prev_cam else "intro",
+        })
+        prev_cam = row["camelot"]
+
+    # quality stats
+    dists = [harmonic_distance(tracks[i - 1]["camelot"], tracks[i]["camelot"])
+             for i in range(1, len(tracks))]
+    compatible = sum(1 for d in dists if d <= 1.0)
+    result = {
+        "count": len(tracks),
+        "compatible_pct": round(100 * compatible / max(1, len(dists)), 1),
+        "target_curve": [round(float(x), 3) for x in _target_curve(len(tracks))],
+        "actual_curve": [t["energy"] for t in tracks],
+        "tracks": tracks,
+    }
+    config.SET_ORDER_JSON.write_text(json.dumps(result, indent=2))
+    print(f"Sequenced {len(tracks)} tracks. "
+          f"{result['compatible_pct']}% of transitions are key-compatible.")
+    print(f"Saved -> {config.SET_ORDER_JSON.name}")
+    return result

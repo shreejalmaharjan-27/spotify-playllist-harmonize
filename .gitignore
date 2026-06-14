@@ -1,0 +1,8 @@
+# secrets & data
+.env
+.cache
+.spotipy_cache
+data/
+__pycache__/
+*.pyc
+.DS_Store
