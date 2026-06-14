@@ -125,9 +125,9 @@ export default function NowPlayingPage() {
           </Card>
 
           <Card className="p-5">
-            <CardLabel>waveform · hands off to next near the end</CardLabel>
+            <CardLabel>waveform · continuous queue timeline</CardLabel>
             <div className="mt-3">
-              <WaveDeck now={now} next={upnext[0] ?? null} />
+              <WaveDeck now={now} tracks={set?.tracks ?? []} pos={pos} />
             </div>
           </Card>
 
