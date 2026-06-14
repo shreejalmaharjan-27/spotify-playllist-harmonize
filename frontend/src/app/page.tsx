@@ -125,7 +125,6 @@ export default function NowPlayingPage() {
           </Card>
 
           <Card className="p-5">
-            <CardLabel>waveform · continuous queue timeline</CardLabel>
             <div className="mt-3">
               <WaveDeck now={now} tracks={set?.tracks ?? []} pos={pos} />
             </div>

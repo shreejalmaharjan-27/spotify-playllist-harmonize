@@ -5,9 +5,8 @@ import { api } from "@/lib/api";
 import type { NowPlaying, Track } from "@/lib/types";
 
 const H = 88; // strip height px
-const VISIBLE_BARS = 110; // zoom for the scrolling transition view
+const VISIBLE_BARS = 220; // zoom for the scrolling transition view (higher = more bars shown)
 const PH = 0.3; // playhead position in scroll mode (fraction from the left)
-const NEXT_INTRO_SEC = 15; // how much of the next song to preview
 const TRANSITION_AT = 30; // seconds remaining when we switch to the scrolling view
 
 type Seg = { id: string; peaks: number[]; future: boolean; offset: number };
@@ -40,6 +39,7 @@ export function WaveDeck({
   const scPlayedRef = useRef<HTMLDivElement>(null);
   const clock = useRef({ id: "", progress: 0, at: 0, playing: false, duration: 0 });
   const transRef = useRef(false);
+  const fetchedRef = useRef<Set<string>>(new Set());
 
   const inSet = pos != null && tracks[pos]?.id === now?.id;
   const nextTrack = inSet && pos != null ? tracks[pos + 1] : undefined;
@@ -53,16 +53,20 @@ export function WaveDeck({
   }, [now?.id, now?.curves?.waveform, now?.duration_ms]);
 
   useEffect(() => {
-    if (nextTrack?.id && !waves[nextTrack.id]) {
+    const nid = nextTrack?.id;
+    if (nid && !fetchedRef.current.has(nid)) {
+      fetchedRef.current.add(nid);
       api
-        .curves(nextTrack.id)
+        .curves(nid)
         .then((c) => {
-          setWaves((m) => ({ ...m, [nextTrack.id]: c.waveform ?? [] }));
-          setDurs((m) => ({ ...m, [nextTrack.id]: c.duration_sec }));
+          setWaves((m) => ({ ...m, [nid]: c.waveform ?? [] }));
+          setDurs((m) => ({ ...m, [nid]: c.duration_sec }));
         })
-        .catch(() => {});
+        .catch(() => {
+          fetchedRef.current.delete(nid); // allow retry on next render
+        });
     }
-  }, [nextTrack?.id, waves]);
+  }, [nextTrack?.id]);
 
   useEffect(() => {
     const c = clock.current;
@@ -95,15 +99,14 @@ export function WaveDeck({
     const segs: Seg[] = [];
     if (now?.id) segs.push({ id: now.id, peaks: curPeaks, future: false, offset: 0 });
     if (nextTrack?.id) {
+      // append the full next waveform so the scrolling view never runs out of
+      // bars / shows dead space — you see as much of the next song as fits.
       const full = waves[nextTrack.id] ?? [];
-      const dur = durs[nextTrack.id] || 0;
-      const frac = dur ? Math.min(1, NEXT_INTRO_SEC / dur) : 0.08;
-      const intro = full.slice(0, Math.max(1, Math.ceil(frac * full.length)));
-      if (intro.length) segs.push({ id: nextTrack.id, peaks: intro, future: true, offset: curLen });
+      if (full.length) segs.push({ id: nextTrack.id, peaks: full, future: true, offset: curLen });
     }
     return { segs, total: segs.reduce((a, s) => a + s.peaks.length, 0) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [now?.id, nextTrack?.id, curLen, waves, durs]);
+  }, [now?.id, nextTrack?.id, curLen, waves]);
 
   const scBarPx = w ? w / VISIBLE_BARS : 0;
 
