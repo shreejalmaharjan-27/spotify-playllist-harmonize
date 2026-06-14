@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
 import { ListMusic, Music2, Radio } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { EnergyArc } from "@/components/energy-arc";
 import { NowProgress } from "@/components/now-progress";
 import { PlaylistPicker } from "@/components/playlist-picker";
 import { Transport } from "@/components/transport";
+import { UpNext } from "@/components/up-next";
 import { Waveform } from "@/components/waveform";
 import { useLive } from "@/lib/useSocket";
 
@@ -20,7 +22,6 @@ export default function NowPlayingPage() {
   const upnext = nowMsg?.upnext ?? [];
   const pos = nowMsg?.pos ?? null;
   const notAuthed = nowMsg?.error === "not_authenticated";
-  const progress = now?.duration_ms ? now.progress_ms / now.duration_ms : 0;
 
   if (notAuthed) return <ConnectPrompt />;
 
@@ -51,24 +52,47 @@ export default function NowPlayingPage() {
           <Card className="p-5">
             {now ? (
               <div className="flex gap-5">
-                {now.album_art ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={now.album_art}
-                    alt=""
-                    className="size-32 rounded-lg object-cover shadow-lg"
-                  />
-                ) : (
-                  <div className="flex size-32 items-center justify-center rounded-lg bg-muted">
-                    <Music2 className="size-8 text-muted-foreground" />
-                  </div>
-                )}
+                <div className="relative size-32 shrink-0 overflow-hidden rounded-lg bg-muted shadow-lg">
+                  <AnimatePresence>
+                    {now.album_art ? (
+                      <motion.img
+                        key={now.id}
+                        src={now.album_art}
+                        alt=""
+                        initial={{ opacity: 0, scale: 1.08 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.45, ease: "easeOut" }}
+                        className="absolute inset-0 size-32 object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-32 items-center justify-center">
+                        <Music2 className="size-8 text-muted-foreground" />
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </div>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="min-w-0">
-                    <h2 className="truncate text-2xl font-bold">{now.name}</h2>
-                    <p className="truncate text-muted-foreground">{now.artists}</p>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={now.id}
+                      className="min-w-0"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3, ease: "easeOut" }}
+                    >
+                      <h2 className="truncate text-2xl font-bold">{now.name}</h2>
+                      <p className="truncate text-muted-foreground">{now.artists}</p>
+                    </motion.div>
+                  </AnimatePresence>
+                  <motion.div
+                    key={`badges-${now.id}`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.05 }}
+                    className="mt-3 flex flex-wrap gap-2"
+                  >
                     {now.camelot ? (
                       <>
                         <Badge className="bg-primary/15 text-primary hover:bg-primary/15">
@@ -83,7 +107,7 @@ export default function NowPlayingPage() {
                         not analyzed — see Library
                       </Badge>
                     )}
-                  </div>
+                  </motion.div>
                   {now.transition && now.transition !== "intro" && (
                     <p className="mt-2 text-sm text-primary">↳ {now.transition}</p>
                   )}
@@ -103,7 +127,7 @@ export default function NowPlayingPage() {
           <Card className="p-5">
             <CardLabel>current track · waveform</CardLabel>
             <div className="mt-3">
-              <Waveform peaks={now?.curves?.waveform ?? []} progress={progress} />
+              <Waveform peaks={now?.curves?.waveform ?? []} now={now} />
             </div>
           </Card>
 
@@ -136,38 +160,8 @@ export default function NowPlayingPage() {
           <Card className="p-5">
             <CardLabel>up next</CardLabel>
             <ScrollArea className="mt-3 h-72">
-              <div className="space-y-1 pr-3">
-                {upnext.length === 0 && (
-                  <p className="py-6 text-center text-sm text-muted-foreground">
-                    queue is empty
-                  </p>
-                )}
-                {upnext.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 rounded-md p-2">
-                    {t.album_art ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={t.album_art}
-                        alt=""
-                        className="size-10 shrink-0 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded bg-muted">
-                        <Music2 className="size-4 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm">{t.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {t.artists}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end">
-                      <span className="text-sm font-semibold text-primary">{t.camelot}</span>
-                      <span className="text-xs text-muted-foreground">{t.bpm.toFixed(0)} BPM</span>
-                    </div>
-                  </div>
-                ))}
+              <div className="pr-3">
+                <UpNext tracks={upnext} />
               </div>
             </ScrollArea>
           </Card>
