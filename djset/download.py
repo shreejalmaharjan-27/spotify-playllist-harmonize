@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
 from . import config
+
+# Invoke yt-dlp as a module of THIS interpreter, not a bare `yt-dlp` from PATH —
+# that avoids picking up a stale system binary (YouTube 403s on old versions).
+YTDLP = [sys.executable, "-m", "yt_dlp"]
 
 
 def _existing(track_id: str):
@@ -45,10 +50,14 @@ def _download_one(row: dict) -> dict:
 
     out_tmpl = str(config.AUDIO_DIR / f"{tid}.%(ext)s")
     query = f"ytsearch1:{artist} {name} audio"
+    # Download the native audio stream WITHOUT re-encoding. We prefer an m4a
+    # (AAC) stream so the file is consistent, falling back to whatever audio is
+    # best (usually Opus). librosa decodes any of these via ffmpeg at analysis
+    # time, so forcing `-x --audio-format m4a` (which transcodes Opus->AAC on
+    # every track and is the real CPU hog) buys us nothing.
     cmd = [
-        "yt-dlp", "--no-playlist", "--quiet", "--no-warnings",
-        "-f", "bestaudio",
-        "-x", "--audio-format", config.AUDIO_EXT, "--audio-quality", config.AUDIO_QUALITY,
+        *YTDLP, "--no-playlist", "--quiet", "--no-warnings",
+        "-f", "bestaudio[ext=m4a]/bestaudio/best",
         # match-filter rejects results whose duration is way off (sped-up/live/wrong)
         "-o", out_tmpl, query,
     ]

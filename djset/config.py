@@ -29,6 +29,8 @@ WEB_APP_URL = os.environ.get("DJSET_WEB_URL", "http://localhost:3000")
 SAMPLE_RATE = 22050          # mono resample target for librosa
 ENERGY_CURVE_POINTS = 100    # downsampled per-track energy curve for the UI
 WAVEFORM_POINTS = 400        # downsampled waveform peaks for the UI
+ANALYZE_MAX_SECONDS = 420    # only load the first ~7 min (covers songs; caps mixes)
+ANALYZE_TIMEOUT_SEC = 90     # hard per-file cap; skip a track that hangs ffmpeg
 
 # Download settings
 AUDIO_EXT = "m4a"

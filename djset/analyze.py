@@ -28,15 +28,36 @@ def _downsample(arr: np.ndarray, n: int) -> list[float]:
     return [round(float(x), 4) for x in arr[idx]]
 
 
+class _FileTimeout(Exception):
+    pass
+
+
+def _raise_timeout(signum, frame):
+    raise _FileTimeout()
+
+
 def analyze_file(path_str: str, track_id: str) -> dict | None:
+    import signal
+
     import librosa  # imported inside worker process
 
     cache = config.FEATURES_DIR / f"{track_id}.json"
     if cache.exists():
         return json.loads(cache.read_text())
 
+    # Hard per-file timeout: a malformed audio file can make ffmpeg/audioread
+    # block forever with no error, freezing the whole pool. Each task runs in a
+    # worker process's main thread, so SIGALRM works here. (No-op on Windows.)
+    have_alarm = hasattr(signal, "SIGALRM")
+    if have_alarm:
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.alarm(config.ANALYZE_TIMEOUT_SEC)
+
     try:
-        y, sr = librosa.load(path_str, sr=config.SAMPLE_RATE, mono=True)
+        # duration cap also keeps pathologically long files (DJ mixes, podcasts)
+        # from blowing up memory/time — a few minutes is plenty for features.
+        y, sr = librosa.load(path_str, sr=config.SAMPLE_RATE, mono=True,
+                             duration=config.ANALYZE_MAX_SECONDS)
         if y.size < sr:  # < 1s of audio is junk
             return None
 
@@ -83,9 +104,15 @@ def analyze_file(path_str: str, track_id: str) -> dict | None:
         }
         cache.write_text(json.dumps(feat))
         return feat
+    except _FileTimeout:
+        print(f"  ! timeout ({config.ANALYZE_TIMEOUT_SEC}s) analyzing {track_id}, skipping")
+        return None
     except Exception as e:
         print(f"  ! analyze failed for {track_id}: {e}")
         return None
+    finally:
+        if have_alarm:
+            signal.alarm(0)
 
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -140,16 +167,20 @@ def run(limit: int | None = None, workers: int | None = None,
         jobs = jobs[:limit]
 
     total = len(jobs)
-    print(f"Analyzing {total} tracks...")
+    if not on_progress:
+        print(f"Analyzing {total} tracks...")
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(analyze_file, p, t): t for p, t in jobs}
         for i, fut in enumerate(as_completed(futures), 1):
             fut.result()
-            if i % 25 == 0 or i == total:
+            # When a progress callback is driving the display, stay quiet so we
+            # don't clobber its single-line bar.
+            if not on_progress and (i % 25 == 0 or i == total):
                 print(f"  [{i}/{total}] analyzed")
             if on_progress:
                 on_progress(i, total, "analyzing audio")
 
     df = _rebuild_parquet(meta)
-    print(f"Saved {len(df)} rows -> {config.FEATURES_PARQUET.name}")
+    if not on_progress:
+        print(f"Saved {len(df)} rows -> {config.FEATURES_PARQUET.name}")
     return df
