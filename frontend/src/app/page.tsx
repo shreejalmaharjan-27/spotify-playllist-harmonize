@@ -6,7 +6,6 @@ import { ListMusic, Music2, Radio } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { CamelotWheel } from "@/components/camelot-wheel";
 import { EnergyArc } from "@/components/energy-arc";
 import { NowProgress } from "@/components/now-progress";
@@ -19,8 +18,9 @@ import { useLive } from "@/lib/useSocket";
 export default function NowPlayingPage() {
   const { now: nowMsg, set } = useLive();
   const now = nowMsg?.now ?? null;
-  const upnext = nowMsg?.upnext ?? [];
   const pos = nowMsg?.pos ?? null;
+  // full remaining queue, derived from the set we already have + current position
+  const upnext = set ? set.tracks.slice((pos ?? -1) + 1) : [];
   const notAuthed = nowMsg?.error === "not_authenticated";
 
   if (notAuthed) return <ConnectPrompt />;
@@ -158,12 +158,10 @@ export default function NowPlayingPage() {
           </Card>
 
           <Card className="p-5">
-            <CardLabel>up next</CardLabel>
-            <ScrollArea className="mt-3 h-72">
-              <div className="pr-3">
-                <UpNext tracks={upnext} />
-              </div>
-            </ScrollArea>
+            <CardLabel>up next{upnext.length ? ` · ${upnext.length}` : ""}</CardLabel>
+            <div className="mt-3">
+              <UpNext tracks={upnext} />
+            </div>
           </Card>
         </div>
       </div>

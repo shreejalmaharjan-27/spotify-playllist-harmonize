@@ -82,7 +82,6 @@ export interface NowMsg {
   type: "now";
   now: NowPlaying | null;
   pos: number | null;
-  upnext: Track[];
   error: string | null;
 }
 export interface JobMsg extends JobState {

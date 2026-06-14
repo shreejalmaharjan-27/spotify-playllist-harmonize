@@ -96,10 +96,10 @@ def _set_payload() -> dict:
 
 
 def _now_payload() -> dict:
-    s = STATE["set"]
-    upnext = s["tracks"][STATE["pos"] + 1: STATE["pos"] + 6] if (s and STATE["pos"] is not None) else []
+    # The full set is sent once over the 'set' frame; the client derives the
+    # up-next list from set.tracks + pos, so we only stream the position here.
     return {"type": "now", "now": STATE["now"], "pos": STATE["pos"],
-            "upnext": upnext, "error": STATE["error"]}
+            "error": STATE["error"]}
 
 
 async def dj_loop():
@@ -203,6 +203,25 @@ def api_select(playlist_id: str):
         spotify_client.start_playback_uris(sp, uris)
         return {"ok": True, "ordered": len(ordered_ids), "missing": len(missing),
                 "compatible_pct": result["compatible_pct"]}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/play_at/{pos}")
+def api_play_at(pos: int):
+    """Jump playback to track `pos` in the active set and continue from there."""
+    try:
+        s = STATE["set"]
+        if not s:
+            return JSONResponse({"error": "no active set"}, status_code=400)
+        tracks = s["tracks"]
+        if pos < 0 or pos >= len(tracks):
+            return JSONResponse({"error": "position out of range"}, status_code=400)
+        sp = spotify_client.client()
+        uris = [t["uri"] for t in tracks[pos:]]  # play from this track onward
+        spotify_client.start_playback_uris(sp, uris)
+        STATE["pos"] = pos  # optimistic; the poll loop reconfirms from playback
+        return {"ok": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

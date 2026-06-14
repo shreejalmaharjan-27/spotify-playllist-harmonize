@@ -30,6 +30,9 @@ export const api = {
   control: (action: "play" | "pause" | "skip" | "prev") =>
     post<{ ok?: boolean; error?: string }>(`/api/control/${action}`),
 
+  playAt: (pos: number) =>
+    post<{ ok?: boolean; error?: string }>(`/api/play_at/${pos}`),
+
   coverage: (playlistId?: string) =>
     get<Coverage>(`/api/coverage${playlistId ? `?playlist_id=${playlistId}` : ""}`),
 
