@@ -14,6 +14,7 @@ import { Cymatics } from "@/components/viz/cymatics";
 import { Vinyl } from "@/components/viz/vinyl";
 import { Synthwave } from "@/components/viz/synthwave";
 import { BeatBloom } from "@/components/viz/beat-bloom";
+import { Fractal } from "@/components/viz/fractal";
 
 // ──────────────────────────────────────────────────────────
 // Butterchurn types
@@ -53,6 +54,7 @@ const CUSTOM_VIZ: { key: string; Comp: React.FC<VizProps> }[] = [
     { key: "⭐ Cymatics", Comp: Cymatics },
     { key: "⭐ Vinyl Turntable", Comp: Vinyl },
     { key: "⭐ Synthwave Grid", Comp: Synthwave },
+    { key: "⭐ Fractal Zoom", Comp: Fractal },
 ];
 const CUSTOM_KEYS = CUSTOM_VIZ.map((v) => v.key);
 const customComp = (key: string | null) => CUSTOM_VIZ.find((v) => v.key === key)?.Comp ?? null;
