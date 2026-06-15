@@ -43,8 +43,7 @@ export function Mandala({ analyser, now, onClick, onContextMenu }: VizProps) {
       if (!running) return;
       const canvas = canvasRef.current;
       if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
-      const [cw, ch] = fitCanvas(canvas);
-      const dpr = window.devicePixelRatio || 1;
+      const [cw, ch, dpr] = fitCanvas(canvas);
       const ctx = canvas.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = "#04050a";
@@ -125,8 +124,7 @@ export function Mandala({ analyser, now, onClick, onContextMenu }: VizProps) {
           const hue = (i / 12) * 360;
           const base = isCur ? 11 : ok ? 8 : 5;
           const rad = base + (isCur ? beat * 7 + energy * 4 : ok ? beat * 2 : 0);
-          if (isCur) { ctx.shadowColor = `hsl(${hue},95%,65%)`; ctx.shadowBlur = 22 + beat * 18; }
-          else if (ok) { ctx.shadowColor = `hsl(${hue},80%,55%)`; ctx.shadowBlur = 8; }
+          if (isCur) { ctx.shadowColor = `hsl(${hue},95%,65%)`; ctx.shadowBlur = 20 + beat * 14; }
           else ctx.shadowBlur = 0;
           ctx.beginPath();
           ctx.arc(x, y, rad, 0, Math.PI * 2);

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { bands, fitCanvas, type VizProps } from "./audio";
 
-const P = 7000; // particle count
+const P = 4200; // particle count
 
 // ~7k particles drifting through an evolving flow field. Bass adds turbulence
 // and speed, treble brightens sparks, energy drifts the hue. Motion trails come
@@ -27,8 +27,7 @@ export function FlowField({ analyser, now, onClick, onContextMenu }: VizProps) {
       if (!running) return;
       const canvas = canvasRef.current;
       if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
-      const [cw, ch] = fitCanvas(canvas);
-      const dpr = window.devicePixelRatio || 1;
+      const [cw, ch, dpr] = fitCanvas(canvas);
       const ctx = canvas.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 

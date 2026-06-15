@@ -9,6 +9,10 @@ import { Sunburst } from "@/components/viz/sunburst";
 import { FlowField } from "@/components/viz/flow-field";
 import { Spectrogram } from "@/components/viz/spectrogram";
 import { Mandala } from "@/components/viz/mandala";
+import { Tunnel } from "@/components/viz/tunnel";
+import { Cymatics } from "@/components/viz/cymatics";
+import { Vinyl } from "@/components/viz/vinyl";
+import { Synthwave } from "@/components/viz/synthwave";
 
 // ──────────────────────────────────────────────────────────
 // Butterchurn types
@@ -43,6 +47,10 @@ const CUSTOM_VIZ: { key: string; Comp: React.FC<VizProps> }[] = [
     { key: "⭐ Particle Flow", Comp: FlowField },
     { key: "⭐ Spectrogram", Comp: Spectrogram },
     { key: "⭐ Harmonic Mandala", Comp: Mandala },
+    { key: "⭐ Audio Tunnel", Comp: Tunnel },
+    { key: "⭐ Cymatics", Comp: Cymatics },
+    { key: "⭐ Vinyl Turntable", Comp: Vinyl },
+    { key: "⭐ Synthwave Grid", Comp: Synthwave },
 ];
 const CUSTOM_KEYS = CUSTOM_VIZ.map((v) => v.key);
 const customComp = (key: string | null) => CUSTOM_VIZ.find((v) => v.key === key)?.Comp ?? null;

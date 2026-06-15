@@ -121,16 +121,21 @@ export function makeInferno(): Uint8Array {
   return lut;
 }
 
-/** Make a canvas's backing store match its CSS size at devicePixelRatio. Returns [cssW, cssH]. */
-export function fitCanvas(canvas: HTMLCanvasElement): [number, number] {
+// Full-screen visualizers don't need true retina — cap the pixel ratio so we
+// don't fill 4× the pixels on a 2× display (a big perf win). Returns the dpr
+// actually used so callers can match their setTransform.
+const MAX_DPR = 1.4;
+
+/** Size a canvas's backing store to its CSS box at a capped DPR. Returns [cssW, cssH, dpr]. */
+export function fitCanvas(canvas: HTMLCanvasElement): [number, number, number] {
   const cw = Math.max(1, canvas.clientWidth);
   const ch = Math.max(1, canvas.clientHeight);
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
   const pw = Math.round(cw * dpr);
   const ph = Math.round(ch * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
     canvas.width = pw;
     canvas.height = ph;
   }
-  return [cw, ch];
+  return [cw, ch, dpr];
 }

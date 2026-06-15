@@ -20,8 +20,7 @@ export function FireBars({ analyser, onClick, onContextMenu }: VizProps) {
       if (!running) return;
       const canvas = canvasRef.current;
       if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
-      const [cw, ch] = fitCanvas(canvas);
-      const dpr = window.devicePixelRatio || 1;
+      const [cw, ch, dpr] = fitCanvas(canvas);
       const ctx = canvas.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = "#000";
@@ -58,10 +57,8 @@ export function FireBars({ analyser, onClick, onContextMenu }: VizProps) {
         ctx.fillRect(x, baseline - bh, bw, bh);
 
         if (v > 0.55) {
-          ctx.shadowColor = "rgba(255,200,90,0.8)";
-          ctx.shadowBlur = 8;
+          ctx.fillStyle = "rgba(255,238,190,0.95)";
           ctx.fillRect(x, baseline - bh, bw, 3);
-          ctx.shadowBlur = 0;
         }
 
         const ph = Math.max(2, peaks[i] * maxBar);

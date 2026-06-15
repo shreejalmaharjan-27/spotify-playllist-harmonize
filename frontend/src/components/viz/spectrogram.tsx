@@ -24,8 +24,7 @@ export function Spectrogram({ analyser, onClick, onContextMenu }: VizProps) {
       if (!running) return;
       const canvas = canvasRef.current;
       if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
-      const [cw, ch] = fitCanvas(canvas);
-      const dpr = window.devicePixelRatio || 1;
+      const [cw, ch, dpr] = fitCanvas(canvas);
       const OW = Math.max(64, Math.round(cw));
 
       // (re)allocate offscreen buffer on size change

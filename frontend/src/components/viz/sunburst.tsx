@@ -37,8 +37,7 @@ export function Sunburst({ analyser, now, onClick, onContextMenu }: VizProps) {
       if (!running) return;
       const canvas = canvasRef.current;
       if (!canvas) { rafRef.current = requestAnimationFrame(draw); return; }
-      const [cw, ch] = fitCanvas(canvas);
-      const dpr = window.devicePixelRatio || 1;
+      const [cw, ch, dpr] = fitCanvas(canvas);
       const ctx = canvas.getContext("2d")!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = "#05060a";
@@ -69,9 +68,8 @@ export function Sunburst({ analyser, now, onClick, onContextMenu }: VizProps) {
         const x2 = cx + Math.cos(ang) * (r0 + len);
         const y2 = cy + Math.sin(ang) * (r0 + len);
         const hue = (hueBase + (i / N) * 90) % 360;
-        ctx.strokeStyle = `hsl(${hue}, 90%, ${50 + v * 35}%)`;
+        ctx.strokeStyle = `hsl(${hue}, 95%, ${50 + v * 42}%)`;
         ctx.lineWidth = Math.max(1.5, (Math.PI * 2 * r0) / N - 2);
-        if (v > 0.6) { ctx.shadowColor = `hsl(${hue},95%,65%)`; ctx.shadowBlur = 14; } else ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
