@@ -8,6 +8,7 @@ build-and-drop target curve so it lands the dopamine peaks.
 from __future__ import annotations
 
 import json
+import random
 
 import numpy as np
 import pandas as pd
@@ -52,29 +53,47 @@ def _step_cost(cur: pd.Series, cand: pd.Series, target_e: float) -> float:
             + w["energy_curve"] * e_curve + w["groove"] * groove)
 
 
-def build_order(df: pd.DataFrame) -> list[str]:
-    """Greedy nearest-neighbour path following the energy target curve."""
+def build_order(df: pd.DataFrame, randomize: bool = True) -> list[str]:
+    """Greedy nearest-neighbour path following the energy target curve.
+
+    When randomize is set, the set is shuffled within the harmonic constraints:
+    a random warm-up start, then a weighted-random pick among the best few next
+    tracks at each step. So every play is fresh but transitions stay smooth.
+    """
     n = len(df)
     target = _target_curve(n)
     ids = df.index.tolist()
 
-    # start: the track closest to the warm-up target energy
-    start = (df["energy_n"] - target[0]).abs().idxmin()
+    # warm-up start: closest to the opening energy, or a random one among the
+    # lowest-energy candidates when shuffling.
+    diffs = (df["energy_n"] - target[0]).abs().sort_values()
+    if randomize and len(diffs) > 1:
+        k = max(1, int(len(diffs) * 0.15))
+        start = random.choice(diffs.index[:k].tolist())
+    else:
+        start = diffs.index[0]
     order = [start]
     used = {start}
 
     for pos in range(1, n):
         cur = df.loc[order[-1]]
         te = target[pos]
-        best_id, best_cost = None, float("inf")
+        scored = []
         for tid in ids:
             if tid in used:
                 continue
-            c = _step_cost(cur, df.loc[tid], te)
-            if c < best_cost:
-                best_cost, best_id = c, tid
-        order.append(best_id)
-        used.add(best_id)
+            scored.append((_step_cost(cur, df.loc[tid], te), tid))
+        if not scored:
+            break
+        scored.sort(key=lambda x: x[0])
+        if randomize and len(scored) > 1:
+            # pick among the best few, weighted toward the cheapest, for variety
+            top = scored[:3]
+            nxt = random.choices([t for _, t in top], weights=[3, 2, 1][:len(top)])[0]
+        else:
+            nxt = scored[0][1]
+        order.append(nxt)
+        used.add(nxt)
     return order
 
 
@@ -89,11 +108,11 @@ def _load_features() -> pd.DataFrame:
     return df.dropna(subset=["camelot", "bpm", "energy_n", "groove_n"])
 
 
-def result_from_df(df: pd.DataFrame) -> dict:
+def result_from_df(df: pd.DataFrame, randomize: bool = True) -> dict:
     """Sequence an analyzed DataFrame into the dashboard set payload."""
     if df.empty:
         raise ValueError("No analyzed tracks to sequence.")
-    order = build_order(df)
+    order = build_order(df, randomize=randomize)
     ordered = df.loc[order]
 
     tracks = []
@@ -127,12 +146,13 @@ def result_from_df(df: pd.DataFrame) -> dict:
     }
 
 
-def order_for_ids(track_ids: list[str]) -> tuple[dict, list[str], list[str]]:
+def order_for_ids(track_ids: list[str], randomize: bool = True) -> tuple[dict, list[str], list[str]]:
     """Order the analyzed subset of a selected playlist.
 
     Returns (set_payload, present_ids_in_order, missing_ids). missing_ids are
     playlist tracks we have no local analysis for; the caller can still queue
-    them (they just won't carry analytics).
+    them (they just won't carry analytics). randomize shuffles the set within
+    the harmonic constraints so each play starts differently.
     """
     df = _load_features()
     # de-dupe while preserving order — a playlist can list the same track twice.
@@ -140,13 +160,13 @@ def order_for_ids(track_ids: list[str]) -> tuple[dict, list[str], list[str]]:
     uniq = [t for t in track_ids if not (t in seen or seen.add(t))]
     present = [t for t in uniq if t in df.index]
     missing = [t for t in uniq if t not in df.index]
-    result = result_from_df(df.loc[present])
+    result = result_from_df(df.loc[present], randomize=randomize)
     return result, [t["id"] for t in result["tracks"]], missing
 
 
 def run() -> dict:
     """Offline: sequence the whole analyzed library to data/set_order.json."""
-    result = result_from_df(_load_features())
+    result = result_from_df(_load_features(), randomize=False)
     config.SET_ORDER_JSON.write_text(json.dumps(result, indent=2))
     print(f"Sequenced {result['count']} tracks. "
           f"{result['compatible_pct']}% of transitions are key-compatible.")
