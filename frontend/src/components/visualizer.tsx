@@ -13,6 +13,7 @@ import { Tunnel } from "@/components/viz/tunnel";
 import { Cymatics } from "@/components/viz/cymatics";
 import { Vinyl } from "@/components/viz/vinyl";
 import { Synthwave } from "@/components/viz/synthwave";
+import { BeatBloom } from "@/components/viz/beat-bloom";
 
 // ──────────────────────────────────────────────────────────
 // Butterchurn types
@@ -42,6 +43,7 @@ const FALLBACK_LABELS: Record<FallbackMode, string> = {
 // feedback-warp shaders — these are distinct, recognizable forms.
 // ──────────────────────────────────────────────────────────
 const CUSTOM_VIZ: { key: string; Comp: React.FC<VizProps> }[] = [
+    { key: "⭐ Beat Bloom", Comp: BeatBloom },
     { key: "⭐ Forest Fire", Comp: FireBars },
     { key: "⭐ Radial Sunburst", Comp: Sunburst },
     { key: "⭐ Particle Flow", Comp: FlowField },
